@@ -15,7 +15,7 @@ Spring Boot 的 JSP 打包/容器限制须按所用版本核对[官方说明](ht
 ## 2. 编译、格式化与最终门禁
 
 - 每批改动后执行相关测试，完成前 `./mvnw verify`；compile 只提供早期反馈。
-- [Stop hook](../templates/project/.claude/hooks/verify-stop.py) 有超时与二次失败出口，不强制离线构建；详情见[模板说明](../templates/README.md)。
+- [Stop hook](../templates/project/.claude/hooks/verify-stop.py) 对环境/超时问题只警告验证未完成，对确认的编译错误有一次修复机会及二次失败出口，不强制离线构建；详情见[模板说明](../templates/README.md)。
 - formatter 必须先在项目配置。不要每次编辑一个 Java 文件就全库 `spotless:apply`，也不要用 `|| true` 吞掉失败。采用项目约定的格式化命令，并把 check 纳入 CI。
 - Java LSP 可辅助导航与诊断，不能替代编译/测试；安装前核对对应语言服务器的 JDK 要求。
 

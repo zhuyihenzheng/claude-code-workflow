@@ -4,55 +4,105 @@
 import json
 import os
 from pathlib import Path
+import re
 import signal
 import subprocess
 import sys
 import tempfile
+from typing import NamedTuple
 
 
-def verify(project_root, timeout=90):
-    """Return an error message, or None on success. Never execute input as code."""
-    wrapper = project_root / "mvnw"
-    if not (project_root / "pom.xml").is_file() or not wrapper.is_file():
-        return "项目根目录缺少 pom.xml 或 mvnw；请按项目构建方式调整 Stop hook。"
+class Verification(NamedTuple):
+    status: str  # passed, compilation_failed, or unavailable (never a success claim)
+    message: str = ""
+
+
+def project_root():
+    # Preserve the invocation path when hooks/ is symlinked to a shared checkout.
+    configured = os.environ.get("CLAUDE_PROJECT_DIR")
+    return Path(configured).absolute() if configured else Path(__file__).absolute().parents[2]
+
+
+def kill_build(process):
+    if process is not None:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+
+def verify(root, timeout=90):
+    """Only explicit Java compilation diagnostics may request another model turn."""
+    wrapper = root / "mvnw"
+    if not (root / "pom.xml").is_file() or not wrapper.is_file():
+        return Verification("unavailable", "项目根目录缺少 pom.xml 或 mvnw；请按项目构建方式调整 Stop hook。")
     if not os.access(wrapper, os.X_OK):
-        return "mvnw 不可执行；请检查并恢复 Maven Wrapper 的执行权限。"
+        return Verification("unavailable", "mvnw 不可执行；请人工检查 Maven Wrapper 的执行权限。")
 
-    # Bound memory use even if Maven emits a large log. Only return its tail.
+    process = None
+    interrupted = None
+    handlers = {}
+
+    def cancel(signum, _frame):
+        nonlocal interrupted
+        interrupted = signum
+        # If the signal arrives during Popen, remember it and clean up after spawn.
+        kill_build(process)
+
+    # Own the child session so timeout/TERM/INT/HUP can terminate all descendants.
+    # SIGKILL cannot be handled; the caller must kill the process tree in that case.
     with tempfile.TemporaryFile() as log:
         try:
-            process = subprocess.Popen(
-                [str(wrapper), "-B", "-q", "compile"],
-                cwd=project_root,
-                stdin=subprocess.DEVNULL,
-                stdout=log,
-                stderr=subprocess.STDOUT,
-                start_new_session=True,
-            )
-        except OSError as exc:
-            return f"无法启动 Maven Wrapper：{exc}"
-
-        timed_out = False
-        try:
-            code = process.wait(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            timed_out = True
-            # Stop descendants too, not just the wrapper shell (macOS/Linux).
+            for signum in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+                handlers[signum] = signal.signal(signum, cancel)
+            if interrupted is not None:
+                return Verification("unavailable", "编译检查已被中断。")
             try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            code = process.wait()
+                process = subprocess.Popen(
+                    [str(wrapper), "-B", "-q", "compile"],
+                    cwd=root,
+                    stdin=subprocess.DEVNULL,
+                    stdout=log,
+                    stderr=subprocess.STDOUT,
+                    start_new_session=True,
+                )
+            except OSError as exc:
+                return Verification("unavailable", f"无法启动 Maven Wrapper：{exc}")
 
-        log.seek(0, os.SEEK_END)
-        log.seek(max(0, log.tell() - 8000))
-        tail = log.read().decode("utf-8", errors="replace").strip()
+            if interrupted is not None:
+                kill_build(process)
+            timed_out = False
+            try:
+                code = process.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                timed_out = True
+                kill_build(process)
+                code = process.wait()
 
+            log.seek(0, os.SEEK_END)
+            log.seek(max(0, log.tell() - 8000))
+            tail = log.read().decode("utf-8", errors="replace").strip()
+        finally:
+            # Also clean up on unexpected errors and wrapper exits with children alive.
+            kill_build(process)
+            if process is not None:
+                process.wait()
+            for signum, handler in handlers.items():
+                signal.signal(signum, handler)
+
+    if interrupted is not None:
+        return Verification("unavailable", f"编译检查被信号 {interrupted} 中断，已清理 Maven 进程组。")
     if timed_out:
-        return f"编译在 {timeout} 秒内未完成；请手动验证并按项目耗时调整超时。\n{tail}"
-    if code != 0:
-        return f"Maven 编译失败（退出码 {code}）。请修复或明确报告环境阻碍。\n{tail}"
-    return None
+        return Verification("unavailable", f"编译在 {timeout} 秒内未完成；请手动验证并按项目耗时调整超时。\n{tail}")
+    if code == 0:
+        return Verification("passed")
+    # Maven uses nonzero exits for dependency/network/JDK/plugin failures too.
+    # Be conservative: an unrecognized diagnostic is incomplete validation, not
+    # proof of a source error. The real build/CI still must pass before merging.
+    compiler_goal = re.search(r"maven-compiler-plugin:[^\s:]+:compile\b", tail)
+    if compiler_goal and re.search(r"Compilation failure", tail, re.IGNORECASE):
+        return Verification("compilation_failed", f"Java 编译失败（退出码 {code}）。请修复编译诊断，不要修改 hook 绕过检查。\n{tail}")
+    return Verification("unavailable", f"Maven 非零退出（{code}），未确认是源码编译错误；请人工检查环境/依赖与日志。\n{tail}")
 
 
 def main():
@@ -64,15 +114,17 @@ def main():
         print(f"Stop hook 输入无效，未执行验证：{exc}", file=sys.stderr)
         return 1
 
-    # Anchor to the copied script even when the session cd's into a module.
-    error = verify(Path(__file__).resolve().parents[2])
-    if error is None:
+    result = verify(project_root())
+    if result.status == "passed":
+        return 0
+    if result.status == "unavailable":
+        # Warning to the user, without an additional model turn or success claim.
+        print(json.dumps({"systemMessage": "编译验证未完成；本次不阻断 Stop。" + result.message}, ensure_ascii=False))
         return 0
     if event.get("stop_hook_active", False):
-        # Report a second failure instead of looping or claiming success.
-        print(json.dumps({"continue": False, "stopReason": error}, ensure_ascii=False))
+        print(json.dumps({"continue": False, "stopReason": result.message}, ensure_ascii=False))
         return 0
-    print(error, file=sys.stderr)
+    print(result.message, file=sys.stderr)
     return 2
 
 

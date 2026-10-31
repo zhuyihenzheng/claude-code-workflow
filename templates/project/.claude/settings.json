@@ -16,6 +16,7 @@
   "permissions": {
     "allow": [
       "Bash(./mvnw -q compile)",
+      "Bash(./mvnw -B -q compile)",
       "Bash(./mvnw test)",
       "Bash(./mvnw verify)",
       "Bash(git status)",
@@ -25,14 +26,10 @@
       "Bash(gh issue view *)"
     ],
     "deny": [
-      "Read(/.env)",
-      "Read(/.env.*)",
       "Read(/**/.env)",
       "Read(/**/.env.*)",
       "Read(/**/*credentials*)",
       "Read(/**/*secret*)",
-      "Edit(/.env)",
-      "Edit(/.env.*)",
       "Edit(/**/.env)",
       "Edit(/**/.env.*)",
       "Edit(/**/*credentials*)",
