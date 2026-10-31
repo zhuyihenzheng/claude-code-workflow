@@ -1,66 +1,75 @@
 # 04 · Java / Spring Boot / HTMX / JSP 专项
 
-> 先说清证据边界：截至 2026 年 10 月底，**社区里没有找到直接针对 "Claude Code × JSP" 或 "HTMX + JSP" 的成文经验**。本节中 JSP 部分是把 HTMX/Thymeleaf + Spring 的公开实践与 JSP 通用最佳实践（Bauke Scholtz 等经典文）迁移过来的结论，已逐条标注为「迁移结论」；Java/Spring 与 HTMX 部分则有社区模板与文章支撑（见 [08](08-参考来源.md)）。
+本节是根据 Spring、HTMX 与 Claude Code 文档整理的项目适配建议，不是已经在你项目上运行过的结果。真实版本、部署方式与既有约定优先。
 
-## 1. CLAUDE.md 里要钉死的 Java 事实
+## 1. 先写清项目事实
 
-社区 Java/Spring 项目模板的共识（多份 2026 年指南一致）：
+- JDK、Spring Boot、HTMX 与数据库版本；Maven/Gradle Wrapper 与真实构建命令。
+- 启动方式：可执行应用还是外部 Tomcat/WAR；端口、context path 与测试 profile。
+- 持久层：MyBatis Mapper / JPA / JDBC 沿用现状，不为套模板迁移框架。
+- REST 与页面的错误响应：REST 通常是 JSON；JSP/HTMX 则需要视图或 HTML 片段，不能统一套 `@RestControllerAdvice` 导致页面收到 JSON。
+- 测试：JUnit/Mockito 按现有依赖版本；数据库行为用合适的集成测试，Testcontainers 需先具备容器运行环境。
 
-- **版本**：JDK 版本、Spring Boot 版本、构建工具与 wrapper（`./mvnw` / `./gradlew`），禁止用系统级 `mvn` 以免版本漂移；
-- **命令**：全量构建、跑单个测试类、跑单个测试方法、起服务（含 profile），全部写全；
-- **分层**：Controller → Service → Repository 单向依赖；构造器注入（不用字段注入）；DTO 不直接暴露 JPA 实体；
-- **测试栈**：JUnit 5 + Mockito；集成测试用 Testcontainers（不要 mock 掉数据库行为的关键路径）；
-- **会误导人的旧代码**：点名遗留写法（如老 JSP 对应的 Controller 风格），注明"新代码不要模仿"。
+Spring Boot 的 JSP 打包/容器限制须按所用版本核对[官方说明](https://docs.spring.io/spring-boot/reference/web/servlet.html#web.servlet.embedded-container.jsp-limitations)，不要把 `spring-boot:run` 当成所有 WAR 项目唯一的启动命令。
 
-模板见 [templates/project/CLAUDE.md](../templates/project/CLAUDE.md)。
+## 2. 编译、格式化与最终门禁
 
-## 2. Java 的天然优势：编译器就是验证回路
+- 每批改动后执行相关测试，完成前 `./mvnw verify`；compile 只提供早期反馈。
+- [Stop hook](../templates/project/.claude/hooks/verify-stop.py) 有超时与二次失败出口，不强制离线构建；详情见[模板说明](../templates/README.md)。
+- formatter 必须先在项目配置。不要每次编辑一个 Java 文件就全库 `spotless:apply`，也不要用 `|| true` 吞掉失败。采用项目约定的格式化命令，并把 check 纳入 CI。
+- Java LSP 可辅助导航与诊断，不能替代编译/测试；安装前核对对应语言服务器的 JDK 要求。
 
-Java 是对 AI 编程最友好的生态之一：强类型 + 编译器 + JUnit 提供**快速、确定**的反馈。把回路配满：
+## 3. JSP 片段是独立视图
 
-- PostToolUse hook：编辑 `.java` 后自动跑格式化（如项目已有的 formatter 插件）+ 增量编译；
-- Stop hook：收工前 `./mvnw -q compile`（或定向测试）不通过则拦截（退出码 2），把错误喂回让它自己修；
-- 排查疑难时再上 `/effort high`，日常 medium 足够。
+默认 `InternalResourceViewResolver` 按前缀与后缀定位 JSP。例如前缀 `/WEB-INF/jsp/`、后缀 `.jsp` 时：
 
-## 3. 代码智能：官方 jdtls-lsp 插件优先
+| Controller 返回的视图名 | JSP 文件 |
+|---|---|
+| `orders/detail` | `/WEB-INF/jsp/orders/detail.jsp` |
+| `fragments/order-form` | `/WEB-INF/jsp/fragments/order-form.jsp` |
 
-- 官方 marketplace 的 `jdtls-lsp` 插件让 Claude 按**符号**跳转定义/找引用、编辑后立即收到诊断，而不是 grep 全文硬读，又准又省 token；
-- 前提：每位成员本机装好 jdtls 二进制（插件本身不带），团队在入职文档里写清安装步骤；
-- Serena（LSP 语义编辑 MCP）对 Java 的增量价值已收窄到跨文件符号级编辑，且其 Java 后端启动明显慢、第三方安全扫描评分偏低——**先用 jdtls-lsp，不够再单独评估 Serena，不要叠装**。
+**`orders/detail :: fragment` 不是默认 JSP 片段语法**。普通 `@Controller` 返回视图名；`@RestController` 的字符串会成为响应体，不是 JSP 视图。
 
-## 4. HTMX 部分
+整页与片段可分路由，也可依项目约定按 `HX-Request: true` 分流；同 URL 分流应处理 `Vary: HX-Request` 与历史恢复。该请求头可伪造，不能用于鉴权。
 
-- 版本与文档：CLAUDE.md 钉死 HTMX 版本；查文档走 Context7（按版本拉取）而不是靠模型记忆；
-- 约定写法：片段端点与整页端点的命名/包位置、`hx-target`/`hx-swap` 的团队默认、错误响应（如 422 + 片段回填表单）的统一处理，写进 `.claude/rules/htmx.md`；
-- **验证的坑**：`hx-target` 写错、swap 目标不存在时 HTMX **静默失败**——MockMvc 和 curl 只能验响应内容，验不出浏览器侧 swap 行为。所以页面改动的验收标准必须包含真实浏览器验证（下一节）。
+来源：[Spring JSP/JSTL](https://docs.spring.io/spring-framework/reference/web/webmvc-view/mvc-jsp.html)。
 
-## 5. 页面验证回路（HTMX + JSP 的唯一可靠验收方式）
+## 4. HTMX 校验失败必须验证响应替换
 
+HTMX 2.x 默认不会 swap 422。若项目约定校验失败返回 422 + 表单 HTML，应在公共布局的 `<head>`、加载 HTMX 前合并如下配置：
+
+```html
+<meta name="htmx-config" content='{"responseHandling":[
+  {"code":"204","swap":false},
+  {"code":"[23]..","swap":true},
+  {"code":"422","swap":true,"error":false},
+  {"code":"[45]..","swap":false,"error":true},
+  {"code":"...","swap":false}
+]}'>
 ```
-改 Controller / JSP → ./mvnw spring-boot:run（或团队起服务命令）
-→ 用官方 webapp-testing skill 驱动 Playwright MCP：
-  打开页面 → 执行交互（点击 hx-get 按钮等）→ 断言目标片段已替换
-  → 截图存档 + 读 console 错误
-→ 截图与断言结果写进 PR 描述，才算完成
-```
 
-- Playwright MCP 是微软官方实现，以无障碍树驱动浏览器、可截图可读 console，是本项目最关键的 MCP；
-- 排查 HTMX 请求头（`HX-Request`、`HX-Target`）、CSRF 403 等浏览器侧问题时，Chrome DevTools MCP（Google 官方）看网络面板更顺手，与 Playwright 二选一起步即可；
-- 注意 Playwright MCP 官方声明它**不是安全边界**：用隔离浏览器 profile，只连本地/测试环境，勿连生产。
+规则按顺序匹配，422 必须先于 `[45]..`。已有全局配置应合并，不能覆盖其他设置；不使用此机制的旧版本沿用其事件处理方式。也可沿用项目已有的 200 + 错误片段契约，重点是前后端一致。
 
-## 6. JSP 遗留页面专项规则（迁移结论）
+`hx-target` 必须解析到预期元素；失败可产生 `htmx:targetError` 等事件，不能只靠 HTTP 200 判断成功。`outerHTML` 替换还须保留后续请求使用的 id。
 
-落为 `.claude/rules/jsp.md` 并用 `paths: ["src/main/webapp/**/*.jsp"]` 限定作用域，只在碰 JSP 时加载：
+来源：[HTMX response handling](https://htmx.org/docs/#response-handling)。
 
-- **禁止新写 scriptlet**（`<% %>` 里写 Java 代码）：新逻辑一律放 Controller/Service，JSP 只做渲染；
-- 表达式用 EL + JSTL 标签；输出必须转义（防 XSS，老页面是重灾区，改到哪查到哪）；
-- JSP 定位是渲染层：不查库、不写业务判断（超过 EL/JSTL 能表达的就回 Controller 准备数据）；
-- 改老页面时保持**手术式修改**：只动任务相关部分，不顺手重构整页（老 JSP 缺测试覆盖，大改风险高）；
-- 每个改过的页面都要过第 5 节的浏览器验证回路——JSP 没有编译期保护，渲染错误只有打开才知道；
-- 中长期：新页面不再新增 JSP（团队若决定迁移模板引擎，那是独立项目，不在本工作流范围内混做）。
+## 5. 真实页面验证
 
-## 7. 数据库访问
+起服务后选择 **Playwright 脚本或 Playwright MCP** 执行交互。官方 `webapp-testing` skill 使用原生 Python Playwright，不依赖 MCP；团队应选能留存和重复执行断言的方式。
 
-- 用 DBHub MCP（Bytebase，一个 server 通吃 Postgres/MySQL 等，工具少、省上下文，也是 Claude Code 官方 MCP 文档里的数据库示例 server）；
-- **只连开发/测试库、只读账号起步**；写操作与生产库一律不通过 MCP；
-- 已归档的官方 Postgres reference server 不要再装（见 [07](07-避坑清单.md)）。
+最少覆盖：
+
+1. 正常加载与成功提交：目标 DOM 确实更新，无意外整页嵌套。
+2. 校验失败：无效输入触发 422/既有状态码，错误提示显示且输入保留。
+3. CSRF/会话过期/认证失败：遵循既有安全契约，不把登录整页注入片段。
+4. 连续操作：替换后 id 与事件仍有效；检查 console、网络与 HTMX 错误事件。
+
+断言、截图与命令输出共同构成证据；截图本身不是自动化测试。MockMvc 可验证状态、model 与视图名，但不能证明 JSP 已在实际容器渲染或浏览器 swap 成功。
+
+## 6. JSP 与安全
+
+- 不新增 scriptlet 业务逻辑，JSP 只渲染准备好的 model。
+- HTML 文本/带引号的普通属性用合适的转义；`c:out` / `fn:escapeXml` 不是 JS、CSS、URL 上下文的通用防注入方案。URL 校验协议并编码，避免脚本内拼接不可信 EL。
+- 老页面做任务内修改；新页面是否使用 JSP 由项目架构决定，不擅自迁移模板引擎。
+- DBHub 仅可选连接开发/测试库，使用数据库实际限制为只读的账号。不要把生产连接交给会话。

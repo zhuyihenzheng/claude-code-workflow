@@ -1,0 +1,20 @@
+{
+  "mcpServers": {
+    "dbhub": {
+      "args": [
+        "-y",
+        "@bytebase/dbhub@1.5.0",
+        "--dsn",
+        "${DATABASE_URL}"
+      ],
+      "command": "npx"
+    },
+    "github": {
+      "headers": {
+        "Authorization": "Bearer ${GITHUB_PERSONAL_ACCESS_TOKEN}"
+      },
+      "type": "http",
+      "url": "https://api.githubcopilot.com/mcp/"
+    }
+  }
+}
