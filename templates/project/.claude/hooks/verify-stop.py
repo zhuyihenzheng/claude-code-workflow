@@ -42,12 +42,21 @@ def verify(root, timeout=90):
     process = None
     interrupted = None
     handlers = {}
+    cleanup_started = False
+
+    def cleanup():
+        nonlocal cleanup_started
+        if process is not None and not cleanup_started:
+            # Repeated killpg after reaping raised EPERM in macOS CI and may
+            # target a reused group ID. Send once, even on reentrant signals.
+            cleanup_started = True
+            kill_build(process)
 
     def cancel(signum, _frame):
         nonlocal interrupted
         interrupted = signum
         # If the signal arrives during Popen, remember it and clean up after spawn.
-        kill_build(process)
+        cleanup()
 
     # Own the child session so timeout/TERM/INT/HUP can terminate all descendants.
     # SIGKILL cannot be handled; the caller must kill the process tree in that case.
@@ -70,13 +79,13 @@ def verify(root, timeout=90):
                 return Verification("unavailable", f"无法启动 Maven Wrapper：{exc}")
 
             if interrupted is not None:
-                kill_build(process)
+                cleanup()
             timed_out = False
             try:
                 code = process.wait(timeout=timeout)
             except subprocess.TimeoutExpired:
                 timed_out = True
-                kill_build(process)
+                cleanup()
                 code = process.wait()
 
             log.seek(0, os.SEEK_END)
@@ -84,7 +93,7 @@ def verify(root, timeout=90):
             tail = log.read().decode("utf-8", errors="replace").strip()
         finally:
             # Also clean up on unexpected errors and wrapper exits with children alive.
-            kill_build(process)
+            cleanup()
             if process is not None:
                 process.wait()
             for signum, handler in handlers.items():

@@ -155,7 +155,9 @@ class StopHookTests(unittest.TestCase):
 
     def test_timeout_kills_wrapper_children_and_warns_without_retry(self):
         self.wrapper('(sleep 0.4; touch escaped) &\nwait')
-        result = hook.verify(self.root, timeout=0.05)
+        with patch.object(hook.os, 'killpg', wraps=os.killpg) as killpg:
+            result = hook.verify(self.root, timeout=0.05)
+        self.assertEqual(killpg.call_count, 1, 'do not signal an already terminated/reaped process group')
         self.assertEqual(result.status, 'unavailable')
         self.assertIn('未完成', result.message)
         output = io.StringIO()
@@ -168,6 +170,8 @@ class StopHookTests(unittest.TestCase):
     def test_signals_clean_up_wrapper_and_children(self):
         for signum in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
             with self.subTest(signal=signum):
+                (self.root / 'ready').unlink(missing_ok=True)
+                (self.root / 'escaped').unlink(missing_ok=True)
                 self.wrapper('(touch ready; sleep 0.5; touch escaped) &\nwait')
                 proc = subprocess.Popen([sys.executable, str(self.script)], cwd=self.root, env=self.env,
                                         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
