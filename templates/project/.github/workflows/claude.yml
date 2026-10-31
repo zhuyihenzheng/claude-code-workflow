@@ -1,0 +1,38 @@
+name: Claude
+
+# 两种用法示例：
+# 1) 在 issue / PR 评论里 @claude 触发（需先执行 /install-github-app 或手动放本文件并配置 Secret）
+# 2) PR 打开时自动初审（按需开启下方 pull_request 触发）
+# 前置：仓库 Secret 里配置 ANTHROPIC_API_KEY（或使用官方 GitHub App 的 OAuth 方式）。
+# 细节以官方文档为准：https://code.claude.com/docs/en/github-actions
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  issues:
+    types: [opened, assigned]
+  # pull_request:
+  #   types: [opened, synchronize]   # ← 打开则每个 PR 自动跑（注意预算）
+
+jobs:
+  claude:
+    if: |
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'issues' && contains(github.event.issue.body, '@claude'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # 可选：限制它能用的工具与轮次，控制成本与风险
+          # claude_args: "--max-turns 20"
