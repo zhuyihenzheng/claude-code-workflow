@@ -41,26 +41,24 @@ Mods 依赖终端 UI，Windows 原生、IDE 插件、Web 版中的可用性以�
 
 ## Skills
 
-[skills/](skills/) 下是 [mattpocock/skills](https://github.com/mattpocock/skills)（MIT）的 5 个技能，已加中文触发词，来源与更新方法见 [skills/UPSTREAM.md](skills/UPSTREAM.md)。
+[skills/](skills/) 下是 [mattpocock/skills](https://github.com/mattpocock/skills)（MIT）的 3 个技能，已加中文触发词，来源与更新方法见 [skills/UPSTREAM.md](skills/UPSTREAM.md)。
 
 | Skill | 触发 | 用途 |
 |---|---|---|
 | `diagnosing-bugs` | 自动：调试 / 排查 / 报错 / 跑不通 / 很慢 | 先建可复现的反馈回路，再假设 → 验证 → 修复 |
 | `grilling` | 自动：拷问我 / 帮我把方案问透 | 实现前把计划追问到底，对应“计划”阶段 |
 | `writing-for-agents` | 自动：写 skill / 改 CLAUDE.md | 编写 CLAUDE.md、skill、AGENTS.md 的原则 |
-| `handoff` | 手动 `/handoff` | 把当前会话压缩成交接文档，给下一个会话或代理 |
-| `retro` | 手动 `/retro` | 会话复盘，沉淀可写进 CLAUDE.md / skill 的教训 |
 
 安装：
 
 ```bash
 # macOS / Linux / WSL
-cp -R templates/user/skills/{diagnosing-bugs,grilling,writing-for-agents,handoff,retro} ~/.claude/skills/
+cp -R templates/user/skills/{diagnosing-bugs,grilling,writing-for-agents} ~/.claude/skills/
 ```
 
 ```powershell
 # Windows 原生（PowerShell）
-Copy-Item -Recurse templates\user\skills\diagnosing-bugs,templates\user\skills\grilling,templates\user\skills\writing-for-agents,templates\user\skills\handoff,templates\user\skills\retro "$env:USERPROFILE\.claude\skills\"
+Copy-Item -Recurse templates\user\skills\diagnosing-bugs,templates\user\skills\grilling,templates\user\skills\writing-for-agents "$env:USERPROFILE\.claude\skills\"
 ```
 
 ## 未收录
@@ -71,3 +69,4 @@ Copy-Item -Recurse templates\user\skills\diagnosing-bugs,templates\user\skills\g
 | `swift-lsp`、`last30days`、`telegram` | 与 Java/Spring 工作流无关 |
 | `savvy-progress@claude-kit` | 只服务于 `/savvy-flow` 多代理流程，按需安装 |
 | `andrej-karpathy-skills` | 上游无许可证声明，不分发 |
+| mattpocock/skills 的 `handoff`、`retro` 等 | 手动触发、通用性强但团队使用频率低；`/compact`、`/resume` 已覆盖多数交接场景。需要时从上游自行安装 |

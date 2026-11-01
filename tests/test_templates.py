@@ -144,7 +144,9 @@ class TemplateTests(unittest.TestCase):
     def test_user_skills_have_matching_frontmatter_and_license(self):
         skills = ROOT / 'templates/user/skills'
         self.assertTrue((skills / 'LICENSE-mattpocock-skills').is_file())
-        for skill in ('diagnosing-bugs', 'grilling', 'writing-for-agents', 'handoff', 'retro'):
+        expected = {'diagnosing-bugs', 'grilling', 'writing-for-agents'}
+        self.assertEqual({p.name for p in skills.iterdir() if p.is_dir()}, expected)
+        for skill in sorted(expected):
             with self.subTest(skill=skill):
                 text = (skills / skill / 'SKILL.md').read_text(encoding='utf-8')
                 self.assertTrue(text.startswith('---\n'))
