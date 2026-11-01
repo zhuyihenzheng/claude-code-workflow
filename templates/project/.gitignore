@@ -5,3 +5,5 @@ CLAUDE.local.md
 !.env.example
 __pycache__/
 *.pyc
+Thumbs.db
+desktop.ini

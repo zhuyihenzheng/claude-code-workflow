@@ -10,7 +10,7 @@
 
 1. **一份短而准的 `CLAUDE.md`**（目标 <200 行，只写代码里看不到的事实：构建/测试命令、版本、被纠正过的坑）；
 2. **一个可判定的验证回路**（JUnit/Testcontainers + `./mvnw verify` + Playwright 打开真实页面验证 HTMX/JSP 渲染）——没有回路，AI 写得再快也只是把 review 压力转嫁给人；
-3. **可自动检查的约束落到工具与 CI**：hooks 提供反馈，permissions 限制匹配工具；进程隔离与最小凭据另行配置，合并门禁由 CI/分支保护执行。
+3. **可自动检查的约束落到工具与 CI**：permissions 限制匹配工具，验证命令显式执行；模板不启用任何 hooks，进程隔离与最小凭据另行配置，合并门禁由 CI/分支保护执行。
 
 ## 本手册的结构
 
@@ -26,6 +26,7 @@
 | [08 · 参考来源](docs/08-参考来源.md) | 一手依据、校验工具与证据边界 |
 | [09 · 审查与修复](docs/09-审查与修复.md) | 原版问题、修复内容、验证结果与剩余限制 |
 | [templates/](templates/) | 需合并适配的模板：CLAUDE.md、settings.json、rules、子代理、skill、.mcp.json、GitHub workflow |
+| [templates/user/](templates/user/README.md) | 个人级（`~/.claude`）推荐：插件 / mods 安装清单、5 个中文触发的通用 skill |
 
 ## 分阶段落地路线图（摘要）
 
@@ -33,7 +34,7 @@
 |---|---|---|---|
 | 0 · 准备 | 第 1–2 天 | 全员装 CLI + IntelliJ 插件；统一账号/计划；仓库建 `.claude/` 骨架 | 每人能在项目里跑起 `claude` 并完成一次小改动 |
 | 1 · 基础 | 第 1 周 | 写 CLAUDE.md（<200 行）；settings.json 权限白名单 + deny `.env`；统一构建/测试命令入口 | 新成员 clone 后开箱可用；`./mvnw -Dtest=X test` 等命令写进 CLAUDE.md |
-| 2 · 回路 | 第 2 周 | 核对 Java LSP 依赖 + 按需启用 MCP；配置有界 Stop 编译反馈与项目格式化检查；HTMX/JSP 页面验证回路（Playwright 脚本或 MCP） | 改完代码自动跑验证；页面改动有截图/断言证据 |
+| 2 · 回路 | 第 2 周 | 核对 Java LSP 依赖 + 按需启用 MCP；显式执行编译、测试与项目格式化检查（默认无 hooks）；HTMX/JSP 页面验证回路（Playwright 脚本或 MCP） | 改完代码执行验证并保留输出；页面改动有截图/断言证据 |
 | 3 · 团队化 | 第 3–4 周 | 接入 GitHub App 与官方 Code Review；沉淀 2–3 个项目自研 skill；/usage 成本复盘定模型路由 | PR 有 AI 初审；团队有自己的 skill 库 |
 | 4 · 进阶（按需） | 之后 | worktree 并行、`/batch` 大改、headless 脚本化、动态工作流做全库审计 | 只在真有并行/批量需求时上，不为炫技引入 |
 
@@ -45,6 +46,8 @@ python3 -m unittest discover -s tests -v
 ```
 
 测试使用模拟 Maven，不调用 Claude API。真实项目的构建、页面、MCP 与 GitHub App 仍需独立验收。
+
+模板提供原生 Windows 的 `mvnw.cmd` 命令、权限与换行配置，CI 矩阵包含 Windows；真实 Windows 集成仍待验收。`verify-stop.py` 原样保留为可选的 macOS/Linux/WSL 参考样例，未注册；需要时由用户自行添加 Stop hook，示例见[模板说明](templates/README.md)。Windows 搭建见 [02 · 基础搭建](docs/02-基础搭建.md#6-windows-两条路径)。
 
 ## 许可证
 

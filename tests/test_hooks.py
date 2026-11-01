@@ -13,6 +13,12 @@ import time
 import unittest
 from unittest.mock import Mock, patch
 
+if os.name == 'nt':
+    raise unittest.SkipTest(
+        'POSIX reference hook requires /bin/sh, process groups, signals and symlinks; '
+        'native Windows hook is disabled'
+    )
+
 SOURCE = Path(__file__).resolve().parents[1] / 'templates/project/.claude/hooks/verify-stop.py'
 spec = importlib.util.spec_from_file_location('verify_stop', SOURCE)
 hook = importlib.util.module_from_spec(spec)

@@ -22,25 +22,38 @@ def markdown_files(root):
 
 def workflow(name):
     # BaseLoader preserves GitHub's YAML 1.2 key "on" (SafeLoader uses YAML 1.1).
-    return yaml.load((PROJECT / '.github/workflows' / name).read_text(), Loader=yaml.BaseLoader)
+    return yaml.load((PROJECT / '.github/workflows' / name).read_text(encoding='utf-8'), Loader=yaml.BaseLoader)
 
 
 class TemplateTests(unittest.TestCase):
     def test_json_templates_parse(self):
         for path in (ROOT / 'templates').rglob('*.json'):
             with self.subTest(path=path):
-                self.assertIsInstance(json.loads(path.read_text()), dict)
+                self.assertIsInstance(json.loads(path.read_text(encoding='utf-8')), dict)
 
-    def test_hook_configuration_has_no_fake_events_and_script_exists(self):
-        config = json.loads((PROJECT / '.claude/settings.json').read_text())
-        self.assertEqual(set(config['hooks']), {'Stop'})
-        handler = config['hooks']['Stop'][0]['hooks'][0]
-        self.assertIn('"$CLAUDE_PROJECT_DIR/.claude/hooks/verify-stop.py"', handler['command'])
-        self.assertGreater(handler['timeout'], 90)
+    def test_no_hooks_enabled_and_reference_script_exists(self):
+        config = json.loads((PROJECT / '.claude/settings.json').read_text(encoding='utf-8'))
+        self.assertNotIn('hooks', config)
         self.assertTrue((PROJECT / '.claude/hooks/verify-stop.py').is_file())
 
+    def test_maven_allow_rules_cover_windows_and_posix(self):
+        allowed = json.loads((PROJECT / '.claude/settings.json').read_text(encoding='utf-8'))['permissions']['allow']
+        for tool, wrapper in (('Bash', './mvnw'), ('Bash', 'mvnw.cmd'),
+                              ('Bash', './mvnw.cmd'), ('PowerShell', '.\\mvnw.cmd')):
+            with self.subTest(tool=tool, wrapper=wrapper):
+                for args in ('-q compile', '-B -q compile', 'test', 'verify'):
+                    self.assertIn(f'{tool}({wrapper} {args})', allowed)
+                self.assertNotIn(f'{tool}({wrapper} *)', allowed)
+
+    def test_wrapper_line_endings_are_explicit(self):
+        attributes = PROJECT / '.gitattributes'
+        self.assertTrue(attributes.is_file())
+        rules = attributes.read_text(encoding='utf-8').splitlines()
+        for rule in ('mvnw text eol=lf', '*.cmd text eol=crlf', '*.sh text eol=lf'):
+            self.assertIn(rule, rules)
+
     def test_migrations_are_not_blanket_denied(self):
-        config = json.loads((PROJECT / '.claude/settings.json').read_text())['permissions']
+        config = json.loads((PROJECT / '.claude/settings.json').read_text(encoding='utf-8'))['permissions']
         self.assertNotIn('Bash(./mvnw *)', config['allow'])
         self.assertFalse(any('db/migration' in x for x in config['deny']))
         self.assertIn('Edit(/src/main/resources/db/migration/**)', config['ask'])
@@ -91,12 +104,12 @@ class TemplateTests(unittest.TestCase):
         self.assertIn('--max-budget-usd', job['steps'][-1]['with']['claude_args'])
 
     def test_active_mcp_needs_no_secrets_and_versions_are_pinned(self):
-        active = json.loads((PROJECT / '.mcp.json').read_text())['mcpServers']
+        active = json.loads((PROJECT / '.mcp.json').read_text(encoding='utf-8'))['mcpServers']
         self.assertNotIn('${', json.dumps(active))
         self.assertNotIn('dbhub', active)
         self.assertNotIn('github', active)
         for path in (ROOT / 'templates').rglob('*mcp*.json'):
-            servers = json.loads(path.read_text())['mcpServers']
+            servers = json.loads(path.read_text(encoding='utf-8'))['mcpServers']
             for server in servers.values():
                 if server.get('command') == 'npx':
                     package = server['args'][1]
@@ -104,7 +117,7 @@ class TemplateTests(unittest.TestCase):
 
     def test_relative_markdown_links_exist(self):
         for path in markdown_files(ROOT):
-            for target in re.findall(r'(?<!!)\[[^\]]+\]\(([^\s)]+)\)', path.read_text()):
+            for target in re.findall(r'(?<!!)\[[^\]]+\]\(([^\s)]+)\)', path.read_text(encoding='utf-8')):
                 if ':' in target or target.startswith('#'):
                     continue
                 target = target.split('#')[0]
@@ -118,14 +131,29 @@ class TemplateTests(unittest.TestCase):
                          'nested/node_modules/pkg/readme.md', 'venv/readme.md', '__pycache__/readme.md'):
                 path = root / name
                 path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_text('[broken dependency link](missing.md)')
-            self.assertEqual({str(p.relative_to(root)) for p in markdown_files(root)}, {'docs/guide.md', 'README.md'})
+                path.write_text('[broken dependency link](missing.md)', encoding='utf-8')
+            self.assertEqual({p.relative_to(root).as_posix() for p in markdown_files(root)}, {'docs/guide.md', 'README.md'})
 
     def test_validation_runs_on_pr_and_main_push_only(self):
-        data = yaml.load((ROOT / '.github/workflows/validate.yml').read_text(), Loader=yaml.BaseLoader)
+        data = yaml.load((ROOT / '.github/workflows/validate.yml').read_text(encoding='utf-8'), Loader=yaml.BaseLoader)
         self.assertIn('pull_request', data['on'])
         self.assertEqual(data['on']['push']['branches'], ['main'])
+        self.assertEqual(set(data['jobs']['validate']['strategy']['matrix']['os']),
+                         {'ubuntu-latest', 'macos-latest', 'windows-latest'})
 
+    def test_user_skills_have_matching_frontmatter_and_license(self):
+        skills = ROOT / 'templates/user/skills'
+        self.assertTrue((skills / 'LICENSE-mattpocock-skills').is_file())
+        for skill in ('diagnosing-bugs', 'grilling', 'writing-for-agents', 'handoff', 'retro'):
+            with self.subTest(skill=skill):
+                text = (skills / skill / 'SKILL.md').read_text(encoding='utf-8')
+                self.assertTrue(text.startswith('---\n'))
+                self.assertIn(f'\nname: {skill}\n', text.split('\n---', 2)[0] + '\n')
+
+    def test_no_personal_absolute_paths(self):
+        for path in markdown_files(ROOT):
+            with self.subTest(path=path):
+                self.assertNotRegex(path.read_text(encoding='utf-8'), r'/Users/[A-Za-z]|[A-Za-z]:\\Users\\[A-Za-z]')
 
 if __name__ == '__main__':
     unittest.main()
