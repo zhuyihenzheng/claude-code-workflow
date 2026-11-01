@@ -1,24 +1,23 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
-  "hooks": {
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/verify-stop.py\"",
-            "timeout": 120
-          }
-        ]
-      }
-    ]
-  },
   "permissions": {
     "allow": [
       "Bash(./mvnw -q compile)",
       "Bash(./mvnw -B -q compile)",
       "Bash(./mvnw test)",
       "Bash(./mvnw verify)",
+      "Bash(mvnw.cmd -q compile)",
+      "Bash(mvnw.cmd -B -q compile)",
+      "Bash(mvnw.cmd test)",
+      "Bash(mvnw.cmd verify)",
+      "Bash(./mvnw.cmd -q compile)",
+      "Bash(./mvnw.cmd -B -q compile)",
+      "Bash(./mvnw.cmd test)",
+      "Bash(./mvnw.cmd verify)",
+      "PowerShell(.\\mvnw.cmd -q compile)",
+      "PowerShell(.\\mvnw.cmd -B -q compile)",
+      "PowerShell(.\\mvnw.cmd test)",
+      "PowerShell(.\\mvnw.cmd verify)",
       "Bash(git status)",
       "Bash(git diff *)",
       "Bash(git log *)",

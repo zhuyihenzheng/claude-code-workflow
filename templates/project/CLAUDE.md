@@ -7,18 +7,32 @@
 
 - JDK：<!-- TODO，如 21 -->
 - Spring Boot：<!-- TODO，如 3.5.x -->
-- 构建：Maven Wrapper（只用 `./mvnw`，不要用系统 mvn）
+- 构建：Maven Wrapper（macOS/Linux/WSL 用 `./mvnw`，Windows 用 `mvnw.cmd`，不要用系统 mvn）
 - 前端：HTMX <!-- TODO 版本，如 2.0.x --> + 服务端渲染 JSP（`src/main/webapp/`），CSS 在 `src/main/webapp/static/css/`
 - 数据库：<!-- TODO，如 PostgreSQL 16 / MySQL 8 -->，集成测试用 Testcontainers
 
 ## 常用命令（写全，不要省略）
 
+macOS / Linux / WSL：
+
 ```bash
 ./mvnw -q compile                              # 编译
+./mvnw test                                    # 全部测试
 ./mvnw -Dtest=OrderServiceTest test            # 跑单个测试类
 ./mvnw -Dtest=OrderServiceTest#createOrder test # 跑单个测试方法
 ./mvnw verify                                  # 全量验证（提交前）
 ./mvnw spring-boot:run -Dspring-boot.run.profiles=local  # 本地起服务，端口 <!-- TODO 8080 -->
+```
+
+Windows CMD（Git Bash 把 `mvnw.cmd` 写为 `./mvnw.cmd`，PowerShell 写为 `.\mvnw.cmd`，参数相同）：
+
+```bat
+mvnw.cmd -q compile
+mvnw.cmd test
+mvnw.cmd -Dtest=OrderServiceTest test
+mvnw.cmd -Dtest=OrderServiceTest#createOrder test
+mvnw.cmd verify
+mvnw.cmd spring-boot:run -Dspring-boot.run.profiles=local
 ```
 
 ## 代码约定
@@ -38,7 +52,7 @@
 
 ## 验证要求（完成标准）
 
-- 后端改动：相关测试转绿 + `./mvnw -q compile` 通过，给出命令输出，不要只说"测试全过"
+- 后端改动：相关测试转绿 + `./mvnw -q compile`（Windows：`mvnw.cmd -q compile`）通过，给出命令输出，不要只说"测试全过"
 - 页面改动：起服务 → 用 Playwright 打开页面执行真实交互 → 断言片段替换成功 + 截图；MockMvc 通过不等于页面可用
 - 编译失败或测试跳过必须明确报告原因，不得宣称验证通过
 
@@ -49,4 +63,4 @@
 - 不顺手重构任务之外的代码；老 JSP 只做手术式修改
 - settings 的路径规则不等于进程隔离；Bash 脚本、MCP、hooks 的权限另行控制。
 - 迁移目录使用 ask 规则，新增迁移仍可经确认创建；已合并迁移是否被篡改由迁移工具校验/CI 检查。
-- Stop hook 仅检查 compile：环境/超时仅警告验证未完成；确认的编译错误首次反馈，修复后仍失败则报告失败并结束；合并前仍须 CI 跑 verify。
+- 模板不启用任何 hooks，不会在会话结束时自动编译。`verify-stop.py` 仅保留为可选的 macOS/Linux/WSL 参考样例，启用需自行添加 Stop 注册；原生 Windows 需用户先改写。验证命令须显式执行，合并前仍须 CI 跑 verify。

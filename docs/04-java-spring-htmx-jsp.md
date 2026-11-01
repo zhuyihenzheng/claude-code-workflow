@@ -15,7 +15,7 @@ Spring Boot 的 JSP 打包/容器限制须按所用版本核对[官方说明](ht
 ## 2. 编译、格式化与最终门禁
 
 - 每批改动后执行相关测试，完成前 `./mvnw verify`；compile 只提供早期反馈。
-- [Stop hook](../templates/project/.claude/hooks/verify-stop.py) 对环境/超时问题只警告验证未完成，对确认的编译错误有一次修复机会及二次失败出口，不强制离线构建；详情见[模板说明](../templates/README.md)。
+- 模板不启用任何 hooks，验证命令须显式执行。[verify-stop.py](../templates/project/.claude/hooks/verify-stop.py) 仅保留为可选 macOS/Linux/WSL 参考样例，未注册；启用需用户自行添加 Stop hook，原生 Windows 需先改写，详情见[模板说明](../templates/README.md)。Windows 的 Maven 命令使用 `mvnw.cmd`（PowerShell 加 `.\`、Git Bash 加 `./`），参数与 `./mvnw` 相同。
 - formatter 必须先在项目配置。不要每次编辑一个 Java 文件就全库 `spotless:apply`，也不要用 `|| true` 吞掉失败。采用项目约定的格式化命令，并把 check 纳入 CI。
 - Java LSP 可辅助导航与诊断，不能替代编译/测试；安装前核对对应语言服务器的 JDK 要求。
 
