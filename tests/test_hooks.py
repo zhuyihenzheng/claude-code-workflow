@@ -11,7 +11,7 @@ import sys
 import tempfile
 import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 SOURCE = Path(__file__).resolve().parents[1] / 'templates/project/.claude/hooks/verify-stop.py'
 spec = importlib.util.spec_from_file_location('verify_stop', SOURCE)
@@ -38,8 +38,8 @@ class StopHookTests(unittest.TestCase):
         p.write_text('#!/bin/sh\n' + body + '\n')
         p.chmod(0o755)
 
-    def compile_failure(self, before=''):
-        self.wrapper(before + '\necho "' + COMPILE_ERROR + '" >&2\necho "cannot find symbol" >&2\nexit 1')
+    def compile_failure(self, before='', after=''):
+        self.wrapper(before + '\necho "' + COMPILE_ERROR + '" >&2\necho "cannot find symbol" >&2\n' + after + '\nexit 1')
 
     def run_hook(self, payload=None, cwd=None):
         return subprocess.run(
@@ -138,7 +138,29 @@ class StopHookTests(unittest.TestCase):
             with self.subTest(diagnostic=diagnostic):
                 self.wrapper('echo "' + diagnostic + '" >&2\nexit 1')
                 for active in (False, True):
-                    self.assertIn(diagnostic, self.assert_unavailable(self.run_hook({'stop_hook_active': active})))
+                    message = self.assert_unavailable(self.run_hook({'stop_hook_active': active}))
+                    self.assertIn('./mvnw -B -q compile', message)
+                    self.assertNotIn(diagnostic, message)
+
+    def test_unsupported_release_overrides_compilation_failure(self):
+        for diagnostic in ('invalid target release: 21', 'release version 21 not supported'):
+            with self.subTest(diagnostic=diagnostic):
+                self.wrapper('echo "' + COMPILE_ERROR.replace('3.13.0', '3.8.1') + '"\n'
+                             'echo "' + diagnostic + '"\n'
+                             'i=0; while [ "$i" -lt 2000 ]; do echo repeated-error; i=$((i+1)); done\nexit 1')
+                for active in (False, True):
+                    message = self.assert_unavailable(self.run_hook({'stop_hook_active': active}))
+                    self.assertIn('JDK', message)
+                    self.assertIn('./mvnw -B -q compile', message)
+                    self.assertNotIn('repeated-error', message)
+
+    def test_unrecognized_failure_warning_omits_large_log(self):
+        self.wrapper('i=0; while [ "$i" -lt 2000 ]; do echo unknown-build-error; i=$((i+1)); done\nexit 7')
+        message = self.assert_unavailable(self.run_hook())
+        self.assertIn('（7）', message)
+        self.assertIn('./mvnw -B -q compile', message)
+        self.assertNotIn('unknown-build-error', message)
+        self.assertLess(len(message), 300)
 
     def test_invalid_payloads_do_not_run_build(self):
         self.wrapper('touch unexpected')
@@ -154,18 +176,75 @@ class StopHookTests(unittest.TestCase):
         self.assertIn('输入无效', result.stderr)
 
     def test_timeout_kills_wrapper_children_and_warns_without_retry(self):
-        self.wrapper('(sleep 0.4; touch escaped) &\nwait')
+        self.wrapper('i=0; while [ "$i" -lt 2000 ]; do echo slow-build-log; i=$((i+1)); done\n'
+                     '(sleep 0.4; touch escaped) &\nwait')
         with patch.object(hook.os, 'killpg', wraps=os.killpg) as killpg:
             result = hook.verify(self.root, timeout=0.05)
         self.assertEqual(killpg.call_count, 1, 'do not signal an already terminated/reaped process group')
         self.assertEqual(result.status, 'unavailable')
         self.assertIn('未完成', result.message)
+        self.assertIn('./mvnw -B -q compile', result.message)
+        self.assertNotIn('slow-build-log', result.message)
+        self.assertLess(len(result.message), 300)
         output = io.StringIO()
         with patch.object(hook, 'verify', return_value=result), patch('sys.stdin', io.StringIO('{}')), contextlib.redirect_stdout(output):
             self.assertEqual(hook.main(), 0)
         self.assertEqual(set(json.loads(output.getvalue())), {'systemMessage'})
         time.sleep(0.5)
         self.assertFalse((self.root / 'escaped').exists())
+
+    def test_completed_build_does_not_signal_reaped_group(self):
+        for failed in (False, True):
+            with self.subTest(failed=failed):
+                if failed:
+                    self.compile_failure()
+                with patch.object(hook.os, 'killpg', side_effect=PermissionError) as killpg:
+                    result = hook.verify(self.root)
+                self.assertEqual(result.status, 'compilation_failed' if failed else 'passed')
+                killpg.assert_not_called()
+
+    def test_cleanup_tolerates_exiting_group_errors(self):
+        for error in (ProcessLookupError, PermissionError):
+            with self.subTest(error=error):
+                process = Mock(pid=12345)
+                process.poll.return_value = None
+                with patch.object(hook.os, 'killpg', side_effect=error) as killpg:
+                    hook.kill_build(process)
+                killpg.assert_called_once_with(process.pid, signal.SIGKILL)
+
+    def test_signal_killpg_eperm_reports_interruption(self):
+        process = Mock(pid=12345)
+        process.poll.side_effect = [None, 0]
+
+        def wait(timeout=None):
+            if timeout is not None:
+                signal.raise_signal(signal.SIGTERM)
+            return 0
+
+        process.wait.side_effect = wait
+        original_handler = signal.getsignal(signal.SIGTERM)
+        output = io.StringIO()
+        with patch.object(hook.subprocess, 'Popen', return_value=process), \
+                patch.object(hook.os, 'killpg', side_effect=PermissionError) as killpg, \
+                patch.object(hook, 'project_root', return_value=self.root), \
+                patch('sys.stdin', io.StringIO('{}')), contextlib.redirect_stdout(output):
+            self.assertEqual(hook.main(), 0)
+        killpg.assert_called_once_with(process.pid, signal.SIGKILL)
+        message = json.loads(output.getvalue())['systemMessage']
+        self.assertIn('中断', message)
+        self.assertIn('已清理', message)
+        self.assertEqual(signal.getsignal(signal.SIGTERM), original_handler)
+
+    def test_timeout_killpg_eperm_reports_unavailable(self):
+        process = Mock(pid=12345)
+        process.poll.side_effect = [None, 0]
+        process.wait.side_effect = [subprocess.TimeoutExpired('mvnw', 0.05), 0, 0]
+        with patch.object(hook.subprocess, 'Popen', return_value=process), \
+                patch.object(hook.os, 'killpg', side_effect=PermissionError) as killpg:
+            result = hook.verify(self.root, timeout=0.05)
+        killpg.assert_called_once_with(process.pid, signal.SIGKILL)
+        self.assertEqual(result.status, 'unavailable')
+        self.assertIn('未完成', result.message)
 
     def test_signals_clean_up_wrapper_and_children(self):
         for signum in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
@@ -201,6 +280,24 @@ class StopHookTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn('cannot find symbol', result.stderr)
         self.assertLess(len(result.stderr), 8500)
+
+    def test_large_log_classifies_goal_before_truncated_tail(self):
+        self.compile_failure(after='i=0; while [ "$i" -lt 2000 ]; do echo "[ERROR] cannot find symbol"; i=$((i+1)); done\n'
+                                   'echo "[ERROR] [Help 1]"')
+        for active in (False, True):
+            result = self.run_hook({'stop_hook_active': active})
+            if active:
+                self.assertEqual(result.returncode, 0, result.stderr)
+                output = json.loads(result.stdout)
+                self.assertIs(output['continue'], False)
+                message = output['stopReason']
+            else:
+                self.assertEqual(result.returncode, 2)
+                message = result.stderr
+            self.assertNotIn('maven-compiler-plugin', message)
+            self.assertIn('cannot find symbol', message)
+            self.assertIn('[Help 1]', message)
+            self.assertLess(len(message), 8500)
 
     def test_wrapper_launch_error_is_reported(self):
         (self.root / 'mvnw').write_text('#!/nonexistent-interpreter\n')

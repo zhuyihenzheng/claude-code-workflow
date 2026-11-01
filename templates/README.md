@@ -23,9 +23,9 @@
 ## Hook 行为与限制
 
 - Stop hook 优先使用 `CLAUDE_PROJECT_DIR`，否则从脚本调用路径定位项目根（不解析共享 hooks 的符号链接），在该根目录运行 `./mvnw -B -q compile`，不使用 `-o`，允许首次下载依赖；首次使用最好先手动预热依赖。
-- 编译超时 90 秒，hook 外层超时 120 秒；大工程需要同时增大两处限制。超时和收到 SIGTERM / SIGINT / SIGHUP 时会终止 Maven 进程组。SIGKILL 无法捕获，调用方须负责清理整棵进程树。
-- 仅在日志包含 Maven compiler 的 `:compile` 目标及 `Compilation failure` 时，首次退出码 2，附日志末尾供修复；`stop_hook_active=true` 时仍重新编译，若再次确认编译失败则用 `continue:false` / `stopReason` 报告失败并结束。
-- 缺少 pom/wrapper、无执行权限、启动错误、超时、中断、依赖/环境错误及无法分类的非零退出：返回 0 与 `systemMessage` 警告“验证未完成”，不请求额外模型轮次，也不表示通过。诊断识别刻意保守；自定义编译器、日志被截断等情况需人工运行构建，CI 必须通过。
+- 编译超时 90 秒，hook 外层超时 120 秒；大工程需要同时增大两处限制。超时和收到 SIGTERM / SIGINT / SIGHUP 时，仅在 Maven leader 仍存活时向进程组发终止信号，退出竞态的 ESRCH/EPERM 不抛异常；回收 leader 后不再向可能复用的 PGID 发信号。wrapper 提前退出后遗留的后台进程由 wrapper/调用方负责清理。SIGKILL 无法捕获，调用方须负责清理整棵进程树。
+- 扫描完整日志分类：包含 Maven compiler 的 `:compile` 目标及 `Compilation failure`，且没有 `invalid target/source release` 或 `release version N not supported` 等 JDK 不匹配诊断时，首次退出码 2，仅附日志末尾最多 8000 字节供修复；`stop_hook_active=true` 时仍重新编译，若再次确认编译失败则用 `continue:false` / `stopReason` 报告失败并结束。
+- 缺少 pom/wrapper、无执行权限、启动错误、超时、中断、依赖/环境错误及无法分类的非零退出：返回 0 与 `systemMessage` 警告“验证未完成”，不请求额外模型轮次，也不表示通过。超时、JDK 不匹配及未知非零退出只显示简短摘要与手动编译命令，不附原始日志。诊断识别刻意保守；自定义编译器等未识别情况需人工运行构建，CI 必须通过。
 - 每次正常结束均会检查（包括只改文档的会话），属于简单默认策略。团队可改为按变更判断，但须覆盖暂存、未暂存、新文件与多模块情况。
 - 没有默认格式化 hook：原模板的 `spotless:apply || true` 会吞错，还可能改到任务之外的文件。先确认项目已配置 formatter，再显式运行项目的格式化命令和 check；失败必须报告。
 - compile 不运行测试，也不验证 JSP 渲染；**CI 的 verify、页面交互断言与分支保护才是合并门禁**。用户中断、hook 超时/禁用等场景也不能视作验证通过。

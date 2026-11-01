@@ -24,10 +24,12 @@ def project_root():
 
 
 def kill_build(process):
-    if process is not None:
+    # Never signal a group after reaping its leader: that PGID may be reused.
+    if process is not None and process.poll() is None:
         try:
             os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
+        except (ProcessLookupError, PermissionError):
+            # The group may disappear or become inaccessible while exiting.
             pass
 
 
@@ -42,21 +44,12 @@ def verify(root, timeout=90):
     process = None
     interrupted = None
     handlers = {}
-    cleanup_started = False
-
-    def cleanup():
-        nonlocal cleanup_started
-        if process is not None and not cleanup_started:
-            # Repeated killpg after reaping raised EPERM in macOS CI and may
-            # target a reused group ID. Send once, even on reentrant signals.
-            cleanup_started = True
-            kill_build(process)
 
     def cancel(signum, _frame):
         nonlocal interrupted
         interrupted = signum
         # If the signal arrives during Popen, remember it and clean up after spawn.
-        cleanup()
+        kill_build(process)
 
     # Own the child session so timeout/TERM/INT/HUP can terminate all descendants.
     # SIGKILL cannot be handled; the caller must kill the process tree in that case.
@@ -79,21 +72,31 @@ def verify(root, timeout=90):
                 return Verification("unavailable", f"无法启动 Maven Wrapper：{exc}")
 
             if interrupted is not None:
-                cleanup()
+                kill_build(process)
             timed_out = False
             try:
                 code = process.wait(timeout=timeout)
             except subprocess.TimeoutExpired:
                 timed_out = True
-                cleanup()
+                kill_build(process)
                 code = process.wait()
 
+            # Classify the complete output; only presentation uses a bounded tail.
+            compiler_goal = compilation_failure = unsupported_release = False
+            log.seek(0)
+            for raw_line in log:
+                line = raw_line.decode("utf-8", errors="replace")
+                compiler_goal |= bool(re.search(r"maven-compiler-plugin:[^\s:]+:compile\b", line))
+                compilation_failure |= bool(re.search(r"Compilation failure", line, re.IGNORECASE))
+                unsupported_release |= bool(re.search(
+                    r"invalid (?:target|source) release|release version \S+ not supported", line, re.IGNORECASE,
+                ))
             log.seek(0, os.SEEK_END)
             log.seek(max(0, log.tell() - 8000))
             tail = log.read().decode("utf-8", errors="replace").strip()
         finally:
-            # Also clean up on unexpected errors and wrapper exits with children alive.
-            cleanup()
+            # Clean up on unexpected errors, but never signal a reaped group.
+            kill_build(process)
             if process is not None:
                 process.wait()
             for signum, handler in handlers.items():
@@ -102,16 +105,17 @@ def verify(root, timeout=90):
     if interrupted is not None:
         return Verification("unavailable", f"编译检查被信号 {interrupted} 中断，已清理 Maven 进程组。")
     if timed_out:
-        return Verification("unavailable", f"编译在 {timeout} 秒内未完成；请手动验证并按项目耗时调整超时。\n{tail}")
+        return Verification("unavailable", f"编译在 {timeout} 秒内未完成；请在项目根运行 ./mvnw -B -q compile 查看日志，并按项目耗时调整超时。")
     if code == 0:
         return Verification("passed")
     # Maven uses nonzero exits for dependency/network/JDK/plugin failures too.
     # Be conservative: an unrecognized diagnostic is incomplete validation, not
     # proof of a source error. The real build/CI still must pass before merging.
-    compiler_goal = re.search(r"maven-compiler-plugin:[^\s:]+:compile\b", tail)
-    if compiler_goal and re.search(r"Compilation failure", tail, re.IGNORECASE):
+    if unsupported_release:
+        return Verification("unavailable", "JDK 不支持项目配置的 Java release；请检查 JDK/JAVA_HOME，并在项目根运行 ./mvnw -B -q compile 查看日志。")
+    if compiler_goal and compilation_failure:
         return Verification("compilation_failed", f"Java 编译失败（退出码 {code}）。请修复编译诊断，不要修改 hook 绕过检查。\n{tail}")
-    return Verification("unavailable", f"Maven 非零退出（{code}），未确认是源码编译错误；请人工检查环境/依赖与日志。\n{tail}")
+    return Verification("unavailable", f"Maven 非零退出（{code}），未确认是源码编译错误；请检查环境/依赖，并在项目根运行 ./mvnw -B -q compile 查看日志。")
 
 
 def main():
