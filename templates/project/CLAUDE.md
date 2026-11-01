@@ -23,16 +23,16 @@
 
 ## 代码约定
 
-- 分层单向依赖：Controller → Service → Repository；Controller 不直接调 Repository
+- 分层单向依赖：Controller → Service → Mapper/Repository；Controller 不直接调持久层
 - 依赖注入只用构造器注入，不用字段注入（`@Autowired` 打在字段上是旧代码才有的写法）
-- DTO 与 JPA 实体分离，Controller 不直接返回实体
-- 异常走全局 `@RestControllerAdvice`（见 `<!-- TODO 类名 -->`），不要在 Controller 里 try-catch 吞异常
+- 持久层沿用项目实际方案（如 MyBatis Mapper / Repository），不要为了模板改成 JPA；Controller 不直接暴露持久层对象
+- REST 异常按项目约定返回 JSON（如 `@RestControllerAdvice`）；JSP/HTMX 页面异常走视图处理（如 `@ControllerAdvice` + ModelAndView），不要让页面收到 JSON 错误体；不要吞异常
 - 测试：JUnit 5 + Mockito；新代码必须带测试，先写失败测试再实现
 
 ## HTMX / JSP 约定
 
 - JSP 只做渲染：禁止新写 scriptlet，逻辑放 Controller/Service；表达式用 EL + JSTL，输出必须转义
-- HTMX 片段端点返回片段视图（命名后缀 `:: fragment` 风格见 `<!-- TODO 既有样例文件 -->`），整页与片段端点分开
+- JSP 片段返回独立 JSP 视图名（如 `fragments/order-form` → `/WEB-INF/jsp/fragments/order-form.jsp`，实际路径以 ViewResolver 为准）；不要使用 Thymeleaf 的 `:: fragment` 语法；整页与片段路由沿用既有约定
 - `hx-target` 必须指向页面上真实存在的 id；改完页面必须走浏览器验证（见 .claude/rules/htmx.md）
 - `<!-- TODO 老页面样例 -->` 是遗留写法，新代码不要模仿它的内联脚本风格
 
@@ -40,10 +40,13 @@
 
 - 后端改动：相关测试转绿 + `./mvnw -q compile` 通过，给出命令输出，不要只说"测试全过"
 - 页面改动：起服务 → 用 Playwright 打开页面执行真实交互 → 断言片段替换成功 + 截图；MockMvc 通过不等于页面可用
-- 收工前不得留下编译失败或未说明的跳过测试
+- 编译失败或测试跳过必须明确报告原因，不得宣称验证通过
 
-## 红线（另在 settings.json 里有机器强制，这里是说明）
+## 约束与边界
 
 - 不读 `.env*` 与任何凭据文件；不连生产数据库
 - 不修改 `src/main/resources/db/migration/` 下已合并的迁移文件
 - 不顺手重构任务之外的代码；老 JSP 只做手术式修改
+- settings 的路径规则不等于进程隔离；Bash 脚本、MCP、hooks 的权限另行控制。
+- 迁移目录使用 ask 规则，新增迁移仍可经确认创建；已合并迁移是否被篡改由迁移工具校验/CI 检查。
+- Stop hook 仅检查 compile：环境/超时仅警告验证未完成；确认的编译错误首次反馈，修复后仍失败则报告失败并结束；合并前仍须 CI 跑 verify。

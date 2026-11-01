@@ -1,0 +1,310 @@
+import contextlib
+import importlib.util
+import io
+import json
+import os
+from pathlib import Path
+import shutil
+import signal
+import subprocess
+import sys
+import tempfile
+import time
+import unittest
+from unittest.mock import Mock, patch
+
+SOURCE = Path(__file__).resolve().parents[1] / 'templates/project/.claude/hooks/verify-stop.py'
+spec = importlib.util.spec_from_file_location('verify_stop', SOURCE)
+hook = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(hook)
+COMPILE_ERROR = '[ERROR] Failed to execute goal org.apache.maven.plugins:maven-compiler-plugin:3.13.0:compile (default-compile) on project demo: Compilation failure'
+
+
+class StopHookTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix='workflow project ')
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.script = self.root / '.claude/hooks/verify-stop.py'
+        self.script.parent.mkdir(parents=True)
+        shutil.copyfile(SOURCE, self.script)
+        (self.root / 'pom.xml').write_text('<project/>')
+        self.wrapper('exit 0')
+        self.env = dict(os.environ)
+        self.env.pop('CLAUDE_PROJECT_DIR', None)
+
+    def wrapper(self, body):
+        p = self.root / 'mvnw'
+        p.write_text('#!/bin/sh\n' + body + '\n')
+        p.chmod(0o755)
+
+    def compile_failure(self, before='', after=''):
+        self.wrapper(before + '\necho "' + COMPILE_ERROR + '" >&2\necho "cannot find symbol" >&2\n' + after + '\nexit 1')
+
+    def run_hook(self, payload=None, cwd=None):
+        return subprocess.run(
+            [sys.executable, str(self.script)],
+            input=json.dumps({'stop_hook_active': False} if payload is None else payload),
+            text=True, capture_output=True, cwd=cwd or self.root, env=self.env, timeout=5,
+        )
+
+    def assert_unavailable(self, result):
+        self.assertEqual(result.returncode, 0, result.stderr)
+        output = json.loads(result.stdout)
+        self.assertEqual(set(output), {'systemMessage'})
+        self.assertIn('验证未完成', output['systemMessage'])
+        return output['systemMessage']
+
+    def test_compile_success(self):
+        result = self.run_hook()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, '')
+
+    def test_failure_blocks_and_includes_maven_diagnostics(self):
+        self.compile_failure()
+        result = self.run_hook()
+        self.assertEqual(result.returncode, 2)
+        self.assertIn('cannot find symbol', result.stderr)
+
+    def test_repeated_failure_stops_and_reports_failure(self):
+        self.compile_failure()
+        result = self.run_hook({'stop_hook_active': True})
+        self.assertEqual(result.returncode, 0)
+        output = json.loads(result.stdout)
+        self.assertIs(output['continue'], False)
+        self.assertIn('cannot find symbol', output['stopReason'])
+
+    def test_repaired_retry_is_verified(self):
+        self.wrapper('touch checked\nexit 0')
+        result = self.run_hook({'stop_hook_active': True})
+        self.assertEqual(result.returncode, 0)
+        self.assertTrue((self.root / 'checked').exists())
+        self.assertEqual(result.stdout, '')
+
+    def test_subdirectory_and_spaces_use_project_root(self):
+        module = self.root / 'module with spaces'
+        module.mkdir()
+        self.wrapper('pwd > actual-cwd\nprintf "%s\\n" "$@" > actual-args')
+        result = self.run_hook({'cwd': str(module)}, cwd=module)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((self.root / 'actual-cwd').read_text().strip(), str(self.root.resolve()))
+        self.assertEqual((self.root / 'actual-args').read_text().splitlines(), ['-B', '-q', 'compile'])
+
+    def test_environment_root_takes_priority(self):
+        other = self.root / 'actual project'
+        other.mkdir()
+        (other / 'pom.xml').write_text('<project/>')
+        shutil.copyfile(self.root / 'mvnw', other / 'mvnw')
+        (other / 'mvnw').write_text('#!/bin/sh\ntouch checked\n')
+        (other / 'mvnw').chmod(0o755)
+        self.env['CLAUDE_PROJECT_DIR'] = str(other)
+        result = self.run_hook()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((other / 'checked').exists())
+        self.assertFalse((self.root / 'checked').exists())
+
+    def test_symlinked_hook_preserves_invocation_project(self):
+        shared = self.root / 'shared hooks'
+        self.script.parent.rename(shared)
+        self.script.parent.symlink_to(shared, target_is_directory=True)
+        self.wrapper('touch checked')
+        for configured in (False, True):
+            with self.subTest(configured=configured):
+                if configured:
+                    self.env['CLAUDE_PROJECT_DIR'] = str(self.root)
+                result = self.run_hook()
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertTrue((self.root / 'checked').exists())
+                (self.root / 'checked').unlink()
+
+    def test_missing_wrapper(self):
+        (self.root / 'mvnw').unlink()
+        self.assertIn('mvnw', self.assert_unavailable(self.run_hook()))
+
+    def test_missing_pom_does_not_execute_wrapper(self):
+        (self.root / 'pom.xml').unlink()
+        self.wrapper('touch unexpected')
+        self.assert_unavailable(self.run_hook())
+        self.assertFalse((self.root / 'unexpected').exists())
+
+    def test_non_executable_wrapper(self):
+        (self.root / 'mvnw').chmod(0o644)
+        self.assert_unavailable(self.run_hook())
+
+    def test_environment_and_unrecognized_failures_do_not_request_retry(self):
+        for diagnostic in ('JAVA_HOME is not defined correctly', 'Could not resolve dependencies',
+                           'maven-compiler-plugin:3.13.0:compile: invalid target release: 99',
+                           'unknown build error'):
+            with self.subTest(diagnostic=diagnostic):
+                self.wrapper('echo "' + diagnostic + '" >&2\nexit 1')
+                for active in (False, True):
+                    message = self.assert_unavailable(self.run_hook({'stop_hook_active': active}))
+                    self.assertIn('./mvnw -B -q compile', message)
+                    self.assertNotIn(diagnostic, message)
+
+    def test_unsupported_release_overrides_compilation_failure(self):
+        for diagnostic in ('invalid target release: 21', 'release version 21 not supported'):
+            with self.subTest(diagnostic=diagnostic):
+                self.wrapper('echo "' + COMPILE_ERROR.replace('3.13.0', '3.8.1') + '"\n'
+                             'echo "' + diagnostic + '"\n'
+                             'i=0; while [ "$i" -lt 2000 ]; do echo repeated-error; i=$((i+1)); done\nexit 1')
+                for active in (False, True):
+                    message = self.assert_unavailable(self.run_hook({'stop_hook_active': active}))
+                    self.assertIn('JDK', message)
+                    self.assertIn('./mvnw -B -q compile', message)
+                    self.assertNotIn('repeated-error', message)
+
+    def test_unrecognized_failure_warning_omits_large_log(self):
+        self.wrapper('i=0; while [ "$i" -lt 2000 ]; do echo unknown-build-error; i=$((i+1)); done\nexit 7')
+        message = self.assert_unavailable(self.run_hook())
+        self.assertIn('（7）', message)
+        self.assertIn('./mvnw -B -q compile', message)
+        self.assertNotIn('unknown-build-error', message)
+        self.assertLess(len(message), 300)
+
+    def test_invalid_payloads_do_not_run_build(self):
+        self.wrapper('touch unexpected')
+        for payload in [[], 'bad', {'stop_hook_active': 'false'}]:
+            with self.subTest(payload=payload):
+                self.assertEqual(self.run_hook(payload).returncode, 1)
+        self.assertFalse((self.root / 'unexpected').exists())
+
+    def test_malformed_json(self):
+        result = subprocess.run([sys.executable, str(self.script)], input='{',
+                                text=True, capture_output=True, env=self.env, timeout=5)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('输入无效', result.stderr)
+
+    def test_timeout_kills_wrapper_children_and_warns_without_retry(self):
+        self.wrapper('i=0; while [ "$i" -lt 2000 ]; do echo slow-build-log; i=$((i+1)); done\n'
+                     '(sleep 0.4; touch escaped) &\nwait')
+        with patch.object(hook.os, 'killpg', wraps=os.killpg) as killpg:
+            result = hook.verify(self.root, timeout=0.05)
+        self.assertEqual(killpg.call_count, 1, 'do not signal an already terminated/reaped process group')
+        self.assertEqual(result.status, 'unavailable')
+        self.assertIn('未完成', result.message)
+        self.assertIn('./mvnw -B -q compile', result.message)
+        self.assertNotIn('slow-build-log', result.message)
+        self.assertLess(len(result.message), 300)
+        output = io.StringIO()
+        with patch.object(hook, 'verify', return_value=result), patch('sys.stdin', io.StringIO('{}')), contextlib.redirect_stdout(output):
+            self.assertEqual(hook.main(), 0)
+        self.assertEqual(set(json.loads(output.getvalue())), {'systemMessage'})
+        time.sleep(0.5)
+        self.assertFalse((self.root / 'escaped').exists())
+
+    def test_completed_build_does_not_signal_reaped_group(self):
+        for failed in (False, True):
+            with self.subTest(failed=failed):
+                if failed:
+                    self.compile_failure()
+                with patch.object(hook.os, 'killpg', side_effect=PermissionError) as killpg:
+                    result = hook.verify(self.root)
+                self.assertEqual(result.status, 'compilation_failed' if failed else 'passed')
+                killpg.assert_not_called()
+
+    def test_cleanup_tolerates_exiting_group_errors(self):
+        for error in (ProcessLookupError, PermissionError):
+            with self.subTest(error=error):
+                process = Mock(pid=12345)
+                process.poll.return_value = None
+                with patch.object(hook.os, 'killpg', side_effect=error) as killpg:
+                    hook.kill_build(process)
+                killpg.assert_called_once_with(process.pid, signal.SIGKILL)
+
+    def test_signal_killpg_eperm_reports_interruption(self):
+        process = Mock(pid=12345)
+        process.poll.side_effect = [None, 0]
+
+        def wait(timeout=None):
+            if timeout is not None:
+                signal.raise_signal(signal.SIGTERM)
+            return 0
+
+        process.wait.side_effect = wait
+        original_handler = signal.getsignal(signal.SIGTERM)
+        output = io.StringIO()
+        with patch.object(hook.subprocess, 'Popen', return_value=process), \
+                patch.object(hook.os, 'killpg', side_effect=PermissionError) as killpg, \
+                patch.object(hook, 'project_root', return_value=self.root), \
+                patch('sys.stdin', io.StringIO('{}')), contextlib.redirect_stdout(output):
+            self.assertEqual(hook.main(), 0)
+        killpg.assert_called_once_with(process.pid, signal.SIGKILL)
+        message = json.loads(output.getvalue())['systemMessage']
+        self.assertIn('中断', message)
+        self.assertIn('已清理', message)
+        self.assertEqual(signal.getsignal(signal.SIGTERM), original_handler)
+
+    def test_timeout_killpg_eperm_reports_unavailable(self):
+        process = Mock(pid=12345)
+        process.poll.side_effect = [None, 0]
+        process.wait.side_effect = [subprocess.TimeoutExpired('mvnw', 0.05), 0, 0]
+        with patch.object(hook.subprocess, 'Popen', return_value=process), \
+                patch.object(hook.os, 'killpg', side_effect=PermissionError) as killpg:
+            result = hook.verify(self.root, timeout=0.05)
+        killpg.assert_called_once_with(process.pid, signal.SIGKILL)
+        self.assertEqual(result.status, 'unavailable')
+        self.assertIn('未完成', result.message)
+
+    def test_signals_clean_up_wrapper_and_children(self):
+        for signum in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+            with self.subTest(signal=signum):
+                (self.root / 'ready').unlink(missing_ok=True)
+                (self.root / 'escaped').unlink(missing_ok=True)
+                self.wrapper('(touch ready; sleep 0.5; touch escaped) &\nwait')
+                proc = subprocess.Popen([sys.executable, str(self.script)], cwd=self.root, env=self.env,
+                                        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                try:
+                    proc.stdin.write('{}')
+                    proc.stdin.close()
+                    proc.stdin = None
+                    deadline = time.monotonic() + 3
+                    while not (self.root / 'ready').exists() and time.monotonic() < deadline:
+                        time.sleep(0.01)
+                    self.assertTrue((self.root / 'ready').exists(), 'wrapper never became ready')
+                    proc.send_signal(signum)
+                    out, err = proc.communicate(timeout=3)
+                    self.assertEqual(proc.returncode, 0, err)
+                    self.assertIn('已清理', json.loads(out)['systemMessage'])
+                    time.sleep(0.6)
+                    self.assertFalse((self.root / 'escaped').exists())
+                finally:
+                    if proc.poll() is None:
+                        proc.terminate()
+                        proc.communicate(timeout=3)
+                (self.root / 'ready').unlink(missing_ok=True)
+
+    def test_large_log_keeps_useful_tail(self):
+        self.compile_failure('i=0; while [ "$i" -lt 2000 ]; do echo long-build-message; i=$((i+1)); done')
+        result = self.run_hook()
+        self.assertEqual(result.returncode, 2)
+        self.assertIn('cannot find symbol', result.stderr)
+        self.assertLess(len(result.stderr), 8500)
+
+    def test_large_log_classifies_goal_before_truncated_tail(self):
+        self.compile_failure(after='i=0; while [ "$i" -lt 2000 ]; do echo "[ERROR] cannot find symbol"; i=$((i+1)); done\n'
+                                   'echo "[ERROR] [Help 1]"')
+        for active in (False, True):
+            result = self.run_hook({'stop_hook_active': active})
+            if active:
+                self.assertEqual(result.returncode, 0, result.stderr)
+                output = json.loads(result.stdout)
+                self.assertIs(output['continue'], False)
+                message = output['stopReason']
+            else:
+                self.assertEqual(result.returncode, 2)
+                message = result.stderr
+            self.assertNotIn('maven-compiler-plugin', message)
+            self.assertIn('cannot find symbol', message)
+            self.assertIn('[Help 1]', message)
+            self.assertLess(len(message), 8500)
+
+    def test_wrapper_launch_error_is_reported(self):
+        (self.root / 'mvnw').write_text('#!/nonexistent-interpreter\n')
+        result = hook.verify(self.root)
+        self.assertEqual(result.status, 'unavailable')
+        self.assertIn('无法启动', result.message)
+
+
+if __name__ == '__main__':
+    unittest.main()
