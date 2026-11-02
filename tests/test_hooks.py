@@ -58,7 +58,7 @@ class StopHookTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         output = json.loads(result.stdout)
         self.assertEqual(set(output), {'systemMessage'})
-        self.assertIn('验证未完成', output['systemMessage'])
+        self.assertIn('検証は完了していません', output['systemMessage'])
         return output['systemMessage']
 
     def test_compile_success(self):
@@ -179,7 +179,7 @@ class StopHookTests(unittest.TestCase):
         result = subprocess.run([sys.executable, str(self.script)], input='{',
                                 text=True, capture_output=True, env=self.env, timeout=5)
         self.assertEqual(result.returncode, 1)
-        self.assertIn('输入无效', result.stderr)
+        self.assertIn('入力が不正', result.stderr)
 
     def test_timeout_kills_wrapper_children_and_warns_without_retry(self):
         self.wrapper('i=0; while [ "$i" -lt 2000 ]; do echo slow-build-log; i=$((i+1)); done\n'
@@ -188,7 +188,7 @@ class StopHookTests(unittest.TestCase):
             result = hook.verify(self.root, timeout=0.05)
         self.assertEqual(killpg.call_count, 1, 'do not signal an already terminated/reaped process group')
         self.assertEqual(result.status, 'unavailable')
-        self.assertIn('未完成', result.message)
+        self.assertIn('完了しませんでした', result.message)
         self.assertIn('./mvnw -B -q compile', result.message)
         self.assertNotIn('slow-build-log', result.message)
         self.assertLess(len(result.message), 300)
@@ -238,7 +238,7 @@ class StopHookTests(unittest.TestCase):
         killpg.assert_called_once_with(process.pid, signal.SIGKILL)
         message = json.loads(output.getvalue())['systemMessage']
         self.assertIn('中断', message)
-        self.assertIn('已清理', message)
+        self.assertIn('終了処理を行いました', message)
         self.assertEqual(signal.getsignal(signal.SIGTERM), original_handler)
 
     def test_timeout_killpg_eperm_reports_unavailable(self):
@@ -250,7 +250,7 @@ class StopHookTests(unittest.TestCase):
             result = hook.verify(self.root, timeout=0.05)
         killpg.assert_called_once_with(process.pid, signal.SIGKILL)
         self.assertEqual(result.status, 'unavailable')
-        self.assertIn('未完成', result.message)
+        self.assertIn('完了しませんでした', result.message)
 
     def test_signals_clean_up_wrapper_and_children(self):
         for signum in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
@@ -271,7 +271,7 @@ class StopHookTests(unittest.TestCase):
                     proc.send_signal(signum)
                     out, err = proc.communicate(timeout=3)
                     self.assertEqual(proc.returncode, 0, err)
-                    self.assertIn('已清理', json.loads(out)['systemMessage'])
+                    self.assertIn('終了処理を行いました', json.loads(out)['systemMessage'])
                     time.sleep(0.6)
                     self.assertFalse((self.root / 'escaped').exists())
                 finally:
@@ -309,7 +309,7 @@ class StopHookTests(unittest.TestCase):
         (self.root / 'mvnw').write_text('#!/nonexistent-interpreter\n')
         result = hook.verify(self.root)
         self.assertEqual(result.status, 'unavailable')
-        self.assertIn('无法启动', result.message)
+        self.assertIn('起動できません', result.message)
 
 
 if __name__ == '__main__':

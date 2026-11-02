@@ -1,8 +1,8 @@
 name: Claude mentions
 
-# Install the Claude GitHub App and set ANTHROPIC_API_KEY first.
-# For subscription auth replace anthropic_api_key with claude_code_oauth_token.
-# Optional automatic review is a separate claude-review.yml.example template.
+# 事前に Claude GitHub App をインストールし、ANTHROPIC_API_KEY を設定する。
+# サブスクリプション認証を使用する場合は、anthropic_api_key を claude_code_oauth_token に置き換える。
+# 任意の自動レビューは、別テンプレート claude-review.yml.example を使用する。
 on:
   issue_comment:
     types: [created]
@@ -43,5 +43,5 @@ jobs:
           additional_permissions: |
             actions: read
           claude_args: "--max-turns 20 --max-budget-usd 5"
-          # Keep the action's default write-access check; do not enable all bots
-          # or allowed_non_write_users: '*'. This job can modify code by design.
+          # action の標準の書き込み権限チェックを維持する。すべての bot や
+          # allowed_non_write_users: '*' を許可しない。このジョブはコードを変更できる構成となっている。
