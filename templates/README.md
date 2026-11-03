@@ -146,6 +146,6 @@ python3 -m pip install -r requirements-dev.txt
 python3 -m unittest discover -s tests -v
 ```
 
-测试覆盖模拟 Maven 的成功/编译错误/环境错误/重试/超时/信号中断及子进程清理、环境变量/符号链接/空格/子目录路径，以及 JSON、workflow 关键配置、agent/skill/rule frontmatter、CLAUDE.md 行数预算、文档相对链接、AGENTS.md 分层/导入与 Copilot 规则同步，和安装脚本的预演/复制/JSON 与行合并/冲突保留/CRLF 保留。它们不调用 Claude API，不消耗模型额度，也不代替真实 Java 项目的验收。
+测试覆盖模拟 Maven 的成功/编译错误/环境错误/重试/超时/信号中断及子进程清理、环境变量/符号链接/空格/子目录路径，以及 JSON、workflow 关键配置、agent/skill/rule frontmatter、CLAUDE.md 行数预算、文档相对链接、AGENTS.md 分层/导入与 Copilot 规则同步，和安装脚本的预演/复制/JSON 与行合并/冲突保留/CRLF 保留。它们不调用 Claude API，不消耗模型额度。CI 的 `sample-app` job 另在真实 Spring Boot + JSP + HTMX 示例应用上执行安装、`./mvnw verify`、Stop hook 与页面检查（见[审查记录](../docs/09-审查与修复.md#第四轮真实-spring-boot--jsp--htmx-端到端验证)），但示例应用不代替你的业务项目验收。
 
 CI 矩阵包含 Linux / macOS / Windows。`tests/test_hooks.py` 仅测试 POSIX 参考脚本，在原生 Windows 整个模块跳过；模板测试在三平台运行。Windows 本地用 `py -m pip install -r requirements-dev.txt` 和 `py -m unittest discover -s tests -v`（或对应的 `python`）。尚未在真实 Windows 验收 Claude Code、Maven 或 MCP。
