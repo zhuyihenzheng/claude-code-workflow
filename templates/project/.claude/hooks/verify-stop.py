@@ -37,9 +37,9 @@ def verify(root, timeout=90):
     """Only explicit Java compilation diagnostics may request another model turn."""
     wrapper = root / "mvnw"
     if not (root / "pom.xml").is_file() or not wrapper.is_file():
-        return Verification("unavailable", "项目根目录缺少 pom.xml 或 mvnw；请按项目构建方式调整 Stop hook。")
+        return Verification("unavailable", "プロジェクトルートに pom.xml または mvnw がありません。プロジェクトのビルド方式に合わせて Stop hook を調整してください。")
     if not os.access(wrapper, os.X_OK):
-        return Verification("unavailable", "mvnw 不可执行；请人工检查 Maven Wrapper 的执行权限。")
+        return Verification("unavailable", "mvnw を実行できません。Maven Wrapper の実行権限を確認してください。")
 
     process = None
     interrupted = None
@@ -58,7 +58,7 @@ def verify(root, timeout=90):
             for signum in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
                 handlers[signum] = signal.signal(signum, cancel)
             if interrupted is not None:
-                return Verification("unavailable", "编译检查已被中断。")
+                return Verification("unavailable", "コンパイルの確認が中断されました。")
             try:
                 process = subprocess.Popen(
                     [str(wrapper), "-B", "-q", "compile"],
@@ -69,7 +69,7 @@ def verify(root, timeout=90):
                     start_new_session=True,
                 )
             except OSError as exc:
-                return Verification("unavailable", f"无法启动 Maven Wrapper：{exc}")
+                return Verification("unavailable", f"Maven Wrapper を起動できません：{exc}")
 
             if interrupted is not None:
                 kill_build(process)
@@ -103,28 +103,28 @@ def verify(root, timeout=90):
                 signal.signal(signum, handler)
 
     if interrupted is not None:
-        return Verification("unavailable", f"编译检查被信号 {interrupted} 中断，已清理 Maven 进程组。")
+        return Verification("unavailable", f"コンパイルの確認がシグナル {interrupted} により中断されました。Maven プロセスグループの終了処理を行いました。")
     if timed_out:
-        return Verification("unavailable", f"编译在 {timeout} 秒内未完成；请在项目根运行 ./mvnw -B -q compile 查看日志，并按项目耗时调整超时。")
+        return Verification("unavailable", f"コンパイルが {timeout} 秒以内に完了しませんでした。プロジェクトルートで ./mvnw -B -q compile を実行してログを確認し、所要時間に応じてタイムアウトを調整してください。")
     if code == 0:
         return Verification("passed")
     # Maven uses nonzero exits for dependency/network/JDK/plugin failures too.
     # Be conservative: an unrecognized diagnostic is incomplete validation, not
     # proof of a source error. The real build/CI still must pass before merging.
     if unsupported_release:
-        return Verification("unavailable", "JDK 不支持项目配置的 Java release；请检查 JDK/JAVA_HOME，并在项目根运行 ./mvnw -B -q compile 查看日志。")
+        return Verification("unavailable", "JDK がプロジェクトで指定された Java release に対応していません。JDK/JAVA_HOME を確認し、プロジェクトルートで ./mvnw -B -q compile を実行してログを確認してください。")
     if compiler_goal and compilation_failure:
-        return Verification("compilation_failed", f"Java 编译失败（退出码 {code}）。请修复编译诊断，不要修改 hook 绕过检查。\n{tail}")
-    return Verification("unavailable", f"Maven 非零退出（{code}），未确认是源码编译错误；请检查环境/依赖，并在项目根运行 ./mvnw -B -q compile 查看日志。")
+        return Verification("compilation_failed", f"Java のコンパイルに失敗しました（終了コード {code}）。コンパイルエラーを修正してください。検証を回避するために hook を変更しないでください。\n{tail}")
+    return Verification("unavailable", f"Maven が非ゼロの終了コード（{code}）で終了しました。ソースコードのコンパイルエラーかどうかは確認できていません。環境／依存関係を確認し、プロジェクトルートで ./mvnw -B -q compile を実行してログを確認してください。")
 
 
 def main():
     try:
         event = json.load(sys.stdin)
         if not isinstance(event, dict) or type(event.get("stop_hook_active", False)) is not bool:
-            raise ValueError("Stop 输入须为对象，stop_hook_active 须为布尔值")
+            raise ValueError("Stop の入力はオブジェクト、stop_hook_active は真偽値である必要があります")
     except (ValueError, TypeError) as exc:
-        print(f"Stop hook 输入无效，未执行验证：{exc}", file=sys.stderr)
+        print(f"Stop hook の入力が不正なため、検証を実行しませんでした：{exc}", file=sys.stderr)
         return 1
 
     result = verify(project_root())
@@ -132,7 +132,7 @@ def main():
         return 0
     if result.status == "unavailable":
         # Warning to the user, without an additional model turn or success claim.
-        print(json.dumps({"systemMessage": "编译验证未完成；本次不阻断 Stop。" + result.message}, ensure_ascii=False))
+        print(json.dumps({"systemMessage": "コンパイルの検証は完了していません。今回は Stop をブロックしません。" + result.message}, ensure_ascii=False))
         return 0
     if event.get("stop_hook_active", False):
         print(json.dumps({"continue": False, "stopReason": result.message}, ensure_ascii=False))

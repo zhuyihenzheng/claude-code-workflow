@@ -26,6 +26,15 @@ def workflow(name):
 
 
 class TemplateTests(unittest.TestCase):
+    def test_project_markdown_has_no_chinese_simplified_characters(self):
+        # Use simplified forms absent from normal Japanese; shared kanji such as
+        # 面, 行, 写, 数, 要, 内 and 容 must remain valid in Japanese templates.
+        simplified_only = set('们这么个进还时说对过门问题应该实现设计测试检查运页开发编译错误关闭删读认证输据库处选择务环变权规间')
+        for path in markdown_files(PROJECT):
+            with self.subTest(path=path.relative_to(PROJECT)):
+                found = sorted(simplified_only.intersection(path.read_text(encoding='utf-8')))
+                self.assertFalse(found, f'Chinese simplified characters remain: {"".join(found)}')
+
     def test_json_templates_parse(self):
         for path in (ROOT / 'templates').rglob('*.json'):
             with self.subTest(path=path):
@@ -98,9 +107,9 @@ class TemplateTests(unittest.TestCase):
         self.assertIn('gh pr view', preflight['run'])
         self.assertNotIn('continue-on-error', preflight)
         prompt = action['with']['prompt']
-        self.assertIn('BASE files only', prompt)
-        self.assertIn("diff's added-side hunk ranges", prompt)
-        self.assertIn('report review incomplete', prompt)
+        self.assertIn('BASE のファイルのみ', prompt)
+        self.assertIn('diff の追加側のハンク範囲', prompt)
+        self.assertIn('「レビュー未完了」と報告', prompt)
         self.assertIn('--max-budget-usd', job['steps'][-1]['with']['claude_args'])
 
     def test_active_mcp_needs_no_secrets_and_versions_are_pinned(self):
@@ -151,6 +160,31 @@ class TemplateTests(unittest.TestCase):
                 text = (skills / skill / 'SKILL.md').read_text(encoding='utf-8')
                 self.assertTrue(text.startswith('---\n'))
                 self.assertIn(f'\nname: {skill}\n', text.split('\n---', 2)[0] + '\n')
+
+    def test_claude_md_stays_under_line_budget(self):
+        lines = (PROJECT / 'CLAUDE.md').read_text(encoding='utf-8').splitlines()
+        self.assertLess(len(lines), 200)
+
+    def test_project_agents_skills_and_rules_have_frontmatter(self):
+        def frontmatter(path):
+            text = path.read_text(encoding='utf-8')
+            self.assertTrue(text.startswith('---\n'), path)
+            return yaml.safe_load(text.split('\n---', 2)[0][4:])
+
+        for path in (PROJECT / '.claude/agents').glob('*.md'):
+            with self.subTest(path=path.name):
+                meta = frontmatter(path)
+                self.assertEqual(meta['name'], path.stem)
+                self.assertTrue(meta['description'])
+                self.assertNotIn('Bash', meta.get('tools', ''))
+        for path in (PROJECT / '.claude/skills').glob('*/SKILL.md'):
+            with self.subTest(path=path.parent.name):
+                meta = frontmatter(path)
+                self.assertEqual(meta['name'], path.parent.name)
+                self.assertTrue(meta['description'])
+        for path in (PROJECT / '.claude/rules').glob('*.md'):
+            with self.subTest(path=path.name):
+                self.assertTrue(frontmatter(path)['paths'])
 
     def test_no_personal_absolute_paths(self):
         for path in markdown_files(ROOT):

@@ -7,3 +7,4 @@ __pycache__/
 *.pyc
 Thumbs.db
 desktop.ini
+node_modules/
