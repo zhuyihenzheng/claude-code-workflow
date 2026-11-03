@@ -12,7 +12,14 @@
 
 ## 安装与适配
 
-1. 按相对路径合并 `project/CLAUDE.md`、`project/.claude/`、`project/.gitignore` 与 `project/.gitattributes` 到目标项目。已有文件逐项合并，不要整目录覆盖。参考脚本可保留供改写；复制文件不会注册 hook。
+1. 按相对路径合并 `project/CLAUDE.md`、`project/.claude/`、`project/.gitignore` 与 `project/.gitattributes` 到目标项目。已有文件逐项合并，不要整目录覆盖。参考脚本可保留供改写；复制文件不会注册 hook。可用 [安装脚本](../scripts/install.py) 预演并执行非破坏性合并（Python 3.9+，跨平台）：
+
+   ```bash
+   python3 scripts/install.py project /path/to/your-project          # 预演，只打印计划
+   python3 scripts/install.py project /path/to/your-project --apply  # 写入 create / merge
+   ```
+
+   规则：目标缺失的文件原样复制（`create`）；内容相同跳过（`skip`）；`.claude/settings.json` 与 `.mcp.json` 只追加缺失的 allow/deny/ask 规则与 MCP server，已有值优先，不会写入 `hooks`（`merge`，JSON 会按 2 空格重新格式化）；`.gitignore` / `.gitattributes` 只追加缺失行并保留原换行；其余不同的文件（CLAUDE.md、rules、workflow 等）报告为 `conflict`，**不改动**，需手动对比。已有的 `Bash(./mvnw *)` 等宽泛规则或与模板 deny/ask 冲突的 allow 会在输出中提示。脚本不删除任何文件，合并后仍须 `git diff` 审查再提交。
 2. 按实际项目填写 CLAUDE.md 的版本、样例路径、启动方式、测试类；MyBatis 项目保留 Mapper，不引入 JPA。外部 Tomcat/WAR 项目使用自己的启动与部署命令。
 3. 手动运行目标项目的 `./mvnw -q compile`、相关测试和 `./mvnw verify`；Windows CMD 用 `mvnw.cmd`，Git Bash 用 `./mvnw.cmd`，PowerShell 用 `.\mvnw.cmd`，参数相同。先解决环境问题，再考虑可选 hook。
 4. 按需合并 `.mcp.json`。默认只有 Context7（无密钥公共访问）和隔离 Playwright；不用的 server 直接移除。
@@ -100,6 +107,6 @@ python3 -m pip install -r requirements-dev.txt
 python3 -m unittest discover -s tests -v
 ```
 
-测试覆盖模拟 Maven 的成功/编译错误/环境错误/重试/超时/信号中断及子进程清理、环境变量/符号链接/空格/子目录路径，以及 JSON、workflow 关键配置和文档相对链接。它们不调用 Claude API，不消耗模型额度，也不代替真实 Java 项目的验收。
+测试覆盖模拟 Maven 的成功/编译错误/环境错误/重试/超时/信号中断及子进程清理、环境变量/符号链接/空格/子目录路径，以及 JSON、workflow 关键配置、agent/skill/rule frontmatter、CLAUDE.md 行数预算、文档相对链接，和安装脚本的预演/复制/JSON 与行合并/冲突保留/CRLF 保留。它们不调用 Claude API，不消耗模型额度，也不代替真实 Java 项目的验收。
 
 CI 矩阵包含 Linux / macOS / Windows。`tests/test_hooks.py` 仅测试 POSIX 参考脚本，在原生 Windows 整个模块跳过；模板测试在三平台运行。Windows 本地用 `py -m pip install -r requirements-dev.txt` 和 `py -m unittest discover -s tests -v`（或对应的 `python`）。尚未在真实 Windows 验收 Claude Code、Maven 或 MCP。

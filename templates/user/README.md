@@ -49,7 +49,14 @@ Mods 依赖终端 UI，Windows 原生、IDE 插件、Web 版中的可用性以�
 | `grilling` | 自动：拷问我 / 帮我把方案问透 | 实现前把计划追问到底，对应“计划”阶段 |
 | `writing-for-agents` | 自动：写 skill / 改 CLAUDE.md | 编写 CLAUDE.md、skill、AGENTS.md 的原则 |
 
-安装：
+安装（推荐用脚本，已存在且内容不同的文件不会被覆盖，每个 skill 目录附带上游 MIT 许可）：
+
+```bash
+python3 scripts/install.py user            # 预演
+python3 scripts/install.py user --apply    # 写入 ~/.claude/skills/
+```
+
+或手动复制：
 
 ```bash
 # macOS / Linux / WSL

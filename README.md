@@ -38,6 +38,16 @@
 | 3 · 团队化 | 第 3–4 周 | 接入 GitHub App 与官方 Code Review；沉淀 2–3 个项目自研 skill；/usage 成本复盘定模型路由 | PR 有 AI 初审；团队有自己的 skill 库 |
 | 4 · 进阶（按需） | 之后 | worktree 并行、`/batch` 大改、headless 脚本化、动态工作流做全库审计 | 只在真有并行/批量需求时上，不为炫技引入 |
 
+## 快速安装到已有项目
+
+```bash
+python3 scripts/install.py project /path/to/your-project          # 预演：create / merge / skip / conflict
+python3 scripts/install.py project /path/to/your-project --apply  # 只写入 create 与 merge
+python3 scripts/install.py user --apply                           # 个人级 skills → ~/.claude/skills
+```
+
+脚本不覆盖已有文件：settings / `.mcp.json` 做规则并集，`.gitignore` / `.gitattributes` 追加缺失行，其余差异列为 conflict 由人工合并。详见[模板说明](templates/README.md#安装与适配)。
+
 ## 模板验证
 
 ```bash

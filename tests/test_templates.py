@@ -152,6 +152,31 @@ class TemplateTests(unittest.TestCase):
                 self.assertTrue(text.startswith('---\n'))
                 self.assertIn(f'\nname: {skill}\n', text.split('\n---', 2)[0] + '\n')
 
+    def test_claude_md_stays_under_line_budget(self):
+        lines = (PROJECT / 'CLAUDE.md').read_text(encoding='utf-8').splitlines()
+        self.assertLess(len(lines), 200)
+
+    def test_project_agents_skills_and_rules_have_frontmatter(self):
+        def frontmatter(path):
+            text = path.read_text(encoding='utf-8')
+            self.assertTrue(text.startswith('---\n'), path)
+            return yaml.safe_load(text.split('\n---', 2)[0][4:])
+
+        for path in (PROJECT / '.claude/agents').glob('*.md'):
+            with self.subTest(path=path.name):
+                meta = frontmatter(path)
+                self.assertEqual(meta['name'], path.stem)
+                self.assertTrue(meta['description'])
+                self.assertNotIn('Bash', meta.get('tools', ''))
+        for path in (PROJECT / '.claude/skills').glob('*/SKILL.md'):
+            with self.subTest(path=path.parent.name):
+                meta = frontmatter(path)
+                self.assertEqual(meta['name'], path.parent.name)
+                self.assertTrue(meta['description'])
+        for path in (PROJECT / '.claude/rules').glob('*.md'):
+            with self.subTest(path=path.name):
+                self.assertTrue(frontmatter(path)['paths'])
+
     def test_no_personal_absolute_paths(self):
         for path in markdown_files(ROOT):
             with self.subTest(path=path):
