@@ -46,3 +46,30 @@ jobs:
       - run: npm install --no-save --no-package-lock playwright@1.63.0 htmx.org@2.0.4
       - run: npx playwright install --with-deps chromium
       - run: python -m unittest tests.test_htmx_check -v
+  sample-app:
+    # Real Spring Boot + JSP + HTMX app: installer, mvnw verify, Stop hook against
+    # real javac output, and htmx-check.mjs against the running server.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --no-save --no-package-lock playwright@1.63.0 htmx.org@2.0.4
+      - run: npx playwright install --with-deps chromium
+      - run: bash tests/e2e_sample_app.sh
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sample-app-e2e
+          path: e2e-output/
+          if-no-files-found: ignore
