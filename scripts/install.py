@@ -18,6 +18,7 @@ Usage:
 import argparse
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import sys
@@ -65,15 +66,17 @@ def merge_settings(existing, template):
             have = permissions.get(key, [])
             if not isinstance(have, list):
                 raise ValueError(f'"permissions.{key}" is not a list')
+            if not all(isinstance(rule, str) for rule in have):
+                raise ValueError(f'"permissions.{key}" contains non-string rules')
             added = [rule for rule in wanted if rule not in have]
             if added:
                 permissions[key] = have + added
-        allowed = set(permissions.get('allow', []))
+        allowed = {rule for rule in permissions.get('allow', []) if isinstance(rule, str)}
         for key in ('deny', 'ask'):
             for rule in template['permissions'].get(key, []):
                 if rule in allowed:
                     notes.append(f'existing allow also contains {key} rule {rule!r}; review it')
-        broad = [r for r in allowed if r.rstrip().endswith(('mvnw *)', 'mvnw.cmd *)'))]
+        broad = [r for r in allowed if re.search(r'mvnw(\.cmd)?(:| )\*\)$', r.strip())]
         notes.extend(f'broad rule {r!r} also allows deploy/arbitrary goals; consider removing' for r in sorted(broad))
         merged['permissions'] = permissions
     if 'mcpServers' in template:
@@ -90,19 +93,27 @@ def merge_settings(existing, template):
     return merged, notes
 
 
-def merge_lines(existing_text, template_text):
+def merge_lines(existing_text, template_text, by_pattern=False):
+    """Return (merged_text or None, notes). by_pattern flags same-pattern overrides."""
     have = {line.strip() for line in existing_text.splitlines()}
     missing = [line for line in template_text.splitlines() if line.strip() and line.strip() not in have]
     if not missing:
-        return None
+        return None, []
+    notes = []
+    if by_pattern:
+        patterns = {line.split()[0] for line in have if line and not line.startswith('#')}
+        notes = [f'existing rule for {line.split()[0]!r} is overridden by appended {line.strip()!r}; review it'
+                 for line in missing if line.split()[0] in patterns]
     newline = '\r\n' if '\r\n' in existing_text else '\n'
     prefix = existing_text if not existing_text or existing_text.endswith(('\n', '\r')) else existing_text + newline
-    return prefix + newline.join(missing) + newline
+    return prefix + newline.join(missing) + newline, notes
 
 
 def plan_file(rel, source, dest, merge_kind=None):
     if not dest.exists():
         return Action('create', rel, source, dest)
+    if dest.is_symlink():
+        return Action('conflict', rel, source, dest, note='destination is a symlink; merge manually')
     if dest.is_dir():
         return Action('conflict', rel, source, dest, note='destination is a directory')
     src_bytes, dst_bytes = source.read_bytes(), dest.read_bytes()
@@ -114,7 +125,7 @@ def plan_file(rel, source, dest, merge_kind=None):
             if not isinstance(existing, dict):
                 raise ValueError('top level is not an object')
             merged, notes = merge_settings(existing, json.loads(src_bytes.decode('utf-8')))
-        except (ValueError, UnicodeDecodeError) as error:
+        except (ValueError, TypeError, UnicodeDecodeError) as error:
             return Action('conflict', rel, source, dest, note=f'cannot merge JSON: {error}')
         note = '; '.join(notes)
         if merged == existing:
@@ -122,12 +133,13 @@ def plan_file(rel, source, dest, merge_kind=None):
         return Action('merge', rel, source, dest, content=dump_json(merged), note=note)
     if merge_kind == 'lines':
         try:
-            merged = merge_lines(dst_bytes.decode('utf-8'), src_bytes.decode('utf-8'))
+            merged, notes = merge_lines(dst_bytes.decode('utf-8'), src_bytes.decode('utf-8'),
+                                        by_pattern=rel.endswith('.gitattributes'))
         except UnicodeDecodeError as error:
             return Action('conflict', rel, source, dest, note=f'cannot merge lines: {error}')
         if merged is None:
             return Action('skip', rel, source, dest)
-        return Action('merge', rel, source, dest, content=merged)
+        return Action('merge', rel, source, dest, content=merged, note='; '.join(notes))
     return Action('conflict', rel, source, dest, note='differs from template; compare and merge manually')
 
 
@@ -136,6 +148,10 @@ def plan_project(target):
     for rel, source in template_files(PROJECT_TEMPLATES):
         kind = 'json' if rel in JSON_MERGE else 'lines' if rel in LINE_MERGE else None
         actions.append(plan_file(rel, source, target / rel, kind))
+    claude_md = next(a for a in actions if a.rel == 'CLAUDE.md')
+    if claude_md.kind == 'conflict' and not claude_md.dest.is_symlink() and '@AGENTS.md' not in claude_md.dest.read_text(
+            encoding='utf-8', errors='replace'):
+        claude_md.note = 'differs from template and lacks the @AGENTS.md import; add it or Claude Code ignores AGENTS.md'
     # The Copilot instruction mirror is regenerated by this script in the target.
     for rel, source in PROJECT_EXTRAS.items():
         actions.append(plan_file(rel, source, target / rel))

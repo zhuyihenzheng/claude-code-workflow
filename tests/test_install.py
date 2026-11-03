@@ -2,6 +2,7 @@ import contextlib
 import importlib.util
 import io
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -113,6 +114,38 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual((self.target / 'CLAUDE.md').read_text(encoding='utf-8'), '# mine\n')
         self.assertRegex(out, r'conflict\s+CLAUDE\.md')
+
+    def test_claude_md_without_agents_import_is_flagged(self):
+        (self.target / 'CLAUDE.md').write_text('# mine\n', encoding='utf-8')
+        note = {a.rel: a for a in install.plan_project(self.target)}['CLAUDE.md'].note
+        self.assertIn('@AGENTS.md', note)
+        (self.target / 'CLAUDE.md').write_text('@AGENTS.md\n# mine\n', encoding='utf-8')
+        note = {a.rel: a for a in install.plan_project(self.target)}['CLAUDE.md'].note
+        self.assertNotIn('lacks', note)
+
+    def test_gitattributes_same_pattern_override_is_noted(self):
+        (self.target / '.gitattributes').write_text('mvnw text eol=crlf\n', encoding='utf-8')
+        action = {a.rel: a for a in install.plan_project(self.target)}['.gitattributes']
+        self.assertEqual(action.kind, 'merge')
+        self.assertIn("'mvnw' is overridden", action.note)
+
+    def test_non_string_rules_and_legacy_broad_syntax(self):
+        settings = self.target / '.claude/settings.json'
+        settings.parent.mkdir()
+        settings.write_text(json.dumps({'permissions': {'allow': [{'tool': 'Bash'}]}}), encoding='utf-8')
+        self.assertEqual(self.kinds()['.claude/settings.json'], 'conflict')
+        settings.write_text(json.dumps({'permissions': {'allow': ['Bash(./mvnw:*)']}}), encoding='utf-8')
+        note = {a.rel: a for a in install.plan_project(self.target)}['.claude/settings.json'].note
+        self.assertIn('broad rule', note)
+
+    @unittest.skipIf(os.name == 'nt', 'symlinks need privileges on Windows')
+    def test_symlinked_destination_is_not_written_through(self):
+        shared = self.target / 'shared-ignore'
+        shared.write_text('x\n', encoding='utf-8')
+        (self.target / '.gitignore').symlink_to(shared)
+        run('project', self.target, '--apply')
+        self.assertEqual(shared.read_text(encoding='utf-8'), 'x\n')
+        self.assertEqual(self.kinds()['.gitignore'], 'conflict')
 
     def test_warns_without_maven_and_refuses_template_repo(self):
         (self.target / 'pom.xml').unlink()

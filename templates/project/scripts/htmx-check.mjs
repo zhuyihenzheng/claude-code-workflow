@@ -102,6 +102,8 @@ async function main() {
     page.on('pageerror', (error) => consoleErrors.push(`pageerror: ${error.message}`));
     await page.addInitScript((events) => {
       window.__htmxCheckErrors = [];
+      window.__htmxCheckSwaps = 0;
+      document.addEventListener('htmx:afterSwap', () => { window.__htmxCheckSwaps += 1; }, true);
       for (const name of events) {
         document.addEventListener(name, (event) => {
           const target = event.target && event.target.id ? `#${event.target.id}` : '';
@@ -128,18 +130,28 @@ async function main() {
     const before = problems.length ? null : await target.innerHTML();
 
     if (!problems.length) {
+      for (const selector of [...options.fills.map(([fill]) => fill), options.click]) {
+        if ((await page.locator(selector).count()) === 0) problems.push(`操作対象 ${selector} が画面にない`);
+      }
+    }
+
+    if (!problems.length) {
       for (const [selector, value] of options.fills) await page.fill(selector, value);
+      await page.evaluate(() => { window.__htmxCheckSwaps = 0; });
       await page.click(options.click);
       try {
+        // A swap must happen (htmx:afterSwap or changed content) so that text that was
+        // already on the page before the click cannot make a broken request pass.
         await page.waitForFunction(({ selector, contains, before }) => {
           const element = document.querySelector(selector);
           if (!element) return false;
-          return contains === undefined ? element.innerHTML !== before : element.textContent.includes(contains);
+          const swapped = window.__htmxCheckSwaps > 0 || element.innerHTML !== before;
+          return swapped && (contains === undefined || element.textContent.includes(contains));
         }, { selector: options.expect, contains: options.contains, before }, { timeout: options.timeout });
       } catch {
         problems.push(options.contains === undefined
           ? `${options.expect} の内容が ${options.timeout}ms 以内に置換されなかった`
-          : `${options.expect} に「${options.contains}」が ${options.timeout}ms 以内に表示されなかった`);
+          : `${options.expect} が ${options.timeout}ms 以内に置換されず、または「${options.contains}」が表示されなかった`);
       }
       // Let htmx settle and late events/console messages arrive.
       await page.waitForTimeout(300);

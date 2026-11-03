@@ -39,6 +39,10 @@ PAGES = {
     'console-error.html': PAGE.format(htmx=HTMX, action=SWAP + " console.error('boom');"),
     'login.html': PAGE.format(htmx=HTMX, action="document.getElementById('target').innerHTML = 'ログイン画面';"),
     'no-htmx.html': PAGE.format(htmx='', action=SWAP),
+    'preexisting.html': PAGE.format(htmx=HTMX, action='').replace('>initial<', '>保存しました<'),
+    'same-render.html': PAGE.format(htmx=HTMX, action=(
+        "document.getElementById('target').dispatchEvent(new CustomEvent('htmx:afterSwap', {bubbles: true}));"
+    )).replace('>initial<', '>保存しました<'),
 }
 
 
@@ -105,6 +109,19 @@ class HtmxCheckTests(unittest.TestCase):
         result = self.check('login.html', '--absent', 'ログイン')
         self.assertEqual(result.returncode, 1)
         self.assertIn('ログイン', result.stderr)
+
+    def test_text_already_present_without_swap_fails(self):
+        result = self.check('preexisting.html', '--contains', '保存しました')
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('置換されず', result.stderr)
+
+    def test_identical_rerender_reported_by_after_swap_passes(self):
+        self.assertEqual(self.check('same-render.html', '--contains', '保存しました').returncode, 0)
+
+    def test_missing_control_is_ng_not_incomplete(self):
+        result = self.check('ok.html', '--fill', '#missing=x')
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('#missing', result.stderr)
 
     def test_page_without_htmx_fails(self):
         result = self.check('no-htmx.html')
