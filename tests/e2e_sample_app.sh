@@ -66,6 +66,8 @@ for _ in $(seq 1 90); do
 done
 curl -fsS http://localhost:8080/orders/new > /dev/null
 
+# The app lives outside the repo; resolve playwright from the repo's node_modules.
+export NODE_PATH="$REPO/node_modules${NODE_PATH:+:$NODE_PATH}"
 check() { node scripts/htmx-check.mjs --url http://localhost:8080/orders/new --expect '#order-form' "$@"; }
 
 step "htmx-check: successful submit"
