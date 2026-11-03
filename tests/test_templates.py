@@ -26,6 +26,15 @@ def workflow(name):
 
 
 class TemplateTests(unittest.TestCase):
+    def test_project_markdown_has_no_chinese_simplified_characters(self):
+        # Use simplified forms absent from normal Japanese; shared kanji such as
+        # 面, 行, 写, 数, 要, 内 and 容 must remain valid in Japanese templates.
+        simplified_only = set('们这么个进还时说对过门问题应该实现设计测试检查运页开发编译错误关闭删读认证输据库处选择务环变权规间')
+        for path in markdown_files(PROJECT):
+            with self.subTest(path=path.relative_to(PROJECT)):
+                found = sorted(simplified_only.intersection(path.read_text(encoding='utf-8')))
+                self.assertFalse(found, f'Chinese simplified characters remain: {"".join(found)}')
+
     def test_json_templates_parse(self):
         for path in (ROOT / 'templates').rglob('*.json'):
             with self.subTest(path=path):
@@ -98,9 +107,9 @@ class TemplateTests(unittest.TestCase):
         self.assertIn('gh pr view', preflight['run'])
         self.assertNotIn('continue-on-error', preflight)
         prompt = action['with']['prompt']
-        self.assertIn('BASE files only', prompt)
-        self.assertIn("diff's added-side hunk ranges", prompt)
-        self.assertIn('report review incomplete', prompt)
+        self.assertIn('BASE のファイルのみ', prompt)
+        self.assertIn('diff の追加側のハンク範囲', prompt)
+        self.assertIn('「レビュー未完了」と報告', prompt)
         self.assertIn('--max-budget-usd', job['steps'][-1]['with']['claude_args'])
 
     def test_active_mcp_needs_no_secrets_and_versions_are_pinned(self):
