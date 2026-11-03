@@ -43,6 +43,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: npm install --no-save --no-package-lock playwright@1.63.0
+      - run: npm install --no-save --no-package-lock playwright@1.63.0 htmx.org@2.0.4
       - run: npx playwright install --with-deps chromium
       - run: python -m unittest tests.test_htmx_check -v

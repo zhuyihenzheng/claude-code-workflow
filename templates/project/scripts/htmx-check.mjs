@@ -21,6 +21,8 @@ const HTMX_ERROR_EVENTS = [
   'htmx:sendAbort', 'htmx:timeout', 'htmx:onLoadError', 'htmx:oobErrorNoTarget',
 ];
 
+const HTTP_STATUS_LOG = /^Failed to load resource: the server responded with a status of \d+/;
+
 const USAGE = `usage: node scripts/htmx-check.mjs --url URL --click SELECTOR --expect SELECTOR
          [--fill SELECTOR=VALUE]... [--contains TEXT] [--absent TEXT]...
          [--screenshot PATH] [--timeout MS] [--allow-console-error TEXT]...`;
@@ -97,7 +99,10 @@ async function main() {
     page.setDefaultTimeout(options.timeout);
     const consoleErrors = [];
     page.on('console', (message) => {
-      if (message.type() === 'error') consoleErrors.push(message.text());
+      // Chromium logs every 4xx/5xx response as a console error. Whether htmx treats
+      // the status as an error is checked via htmx:responseError instead, so an
+      // intended 422 re-render is not reported twice; net::ERR_* failures still count.
+      if (message.type() === 'error' && !HTTP_STATUS_LOG.test(message.text())) consoleErrors.push(message.text());
     });
     page.on('pageerror', (error) => consoleErrors.push(`pageerror: ${error.message}`));
     await page.addInitScript((events) => {

@@ -41,7 +41,7 @@ node scripts/htmx-check.mjs --url http://localhost:8080/orders/new \
   --contains "登録しました" --absent "ログイン" --screenshot target/htmx-check/success.png
 ```
 
-每次运行验证一次交互；成功提交、校验失败回填、会话失效分别运行。需要登录的页面请在脚本基础上加入团队的测试账号登录步骤（只用合成数据账号）。本仓库测试用模拟 htmx 事件的本地页面验证脚本判定逻辑，并在 CI 的 Ubuntu 浏览器 job 中强制执行；它没有加载真实 htmx 库，也不代替目标项目页面的验收。
+每次运行验证一次交互；成功提交、校验失败回填、会话失效分别运行。需要登录的页面请在脚本基础上加入团队的测试账号登录步骤（只用合成数据账号）。本仓库测试分两组：模拟 htmx 事件的本地页面验证判定逻辑；CI 的 Ubuntu 浏览器 job 还用 npm 安装的真实 `htmx.org@2.0.4` 与模拟服务端，验证成功替换、`hx-target` 不存在（`htmx:targetError`）、默认不替换 422、[04 专项](../docs/04-java-spring-htmx-jsp.md#4-htmx-校验失败必须验证响应替换) 中的 422 `responseHandling` 配置能替换错误片段，以及登录页塞进片段会被判 NG。该 job 设置 `HTMX_CHECK_REQUIRED=1`，缺少依赖即失败而非跳过。Chromium 把 4xx/5xx 响应记成 console 错误，脚本忽略这类状态日志，由 `htmx:responseError` 判断 htmx 是否视为错误。这些测试不代替目标项目页面的验收。
 
 ## 规则维护与 Copilot 兼容范围
 
