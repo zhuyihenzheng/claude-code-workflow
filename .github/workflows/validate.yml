@@ -30,3 +30,19 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/demo" && touch "$RUNNER_TEMP/demo/pom.xml" "$RUNNER_TEMP/demo/mvnw"
           python scripts/install.py project "$RUNNER_TEMP/demo"
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      HTMX_CHECK_REQUIRED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --no-save --no-package-lock playwright@1.63.0
+      - run: npx playwright install --with-deps chromium
+      - run: python -m unittest tests.test_htmx_check -v

@@ -29,6 +29,20 @@
 5. DBHub / GitHub 是 [可选配置](mcp.optional.json)。只合并需要的 server，并在启动前提供 `DATABASE_URL` / `GITHUB_PERSONAL_ACCESS_TOKEN`；DBHub 只能用开发/测试库的只读账号。Context7 需要认证时可按其官方文档加 `CONTEXT7_API_KEY` header。
 6. GitHub 集成按下面的 workflow 分别配置认证：交互模式使用 Claude GitHub App，自动评审示例使用只读 workflow token；两者都需模型凭据。不需要 GitHub 自动化就不复制它们。
 
+## HTMX 页面检查脚本
+
+[`project/scripts/htmx-check.mjs`](project/scripts/htmx-check.mjs) 用 Playwright 打开真实页面：填写 → 点击 → 等待 `--expect` 目标被替换（或出现 `--contains` 文本）→ 检查 `--absent`（例如登录页文字未塞进片段）、`htmx:targetError` / `responseError` / `swapError` 等错误事件、console 错误 → 可选截图。退出码 `0` 合格、`1` 断言失败、`2` 参数/浏览器/服务不可达等“验证未完成”，不能把 2 当成通过。
+
+```bash
+npm install --no-save --no-package-lock playwright   # Playwright MCP 已要求 Node；按团队固定版本
+npx playwright install chromium
+node scripts/htmx-check.mjs --url http://localhost:8080/orders/new \
+  --fill "#name=テスト" --click "#submit" --expect "#order-form" \
+  --contains "登録しました" --absent "ログイン" --screenshot target/htmx-check/success.png
+```
+
+每次运行验证一次交互；成功提交、校验失败回填、会话失效分别运行。需要登录的页面请在脚本基础上加入团队的测试账号登录步骤（只用合成数据账号）。本仓库测试用模拟 htmx 事件的本地页面验证脚本判定逻辑，并在 CI 的 Ubuntu 浏览器 job 中强制执行；它没有加载真实 htmx 库，也不代替目标项目页面的验收。
+
 ## 规则维护与 Copilot 兼容范围
 
 AGENTS.md 是项目规则的唯一事实来源；`.github/copilot-instructions.md` 只保留必守摘要，修改共通规则时同时核对摘要。路径细则只改 `.claude/rules/*.md`，由脚本转换 `paths:` 列表为 Copilot 的 `applyTo`，正文原样生成；不要直接编辑 `.github/instructions/` 镜像。

@@ -56,7 +56,7 @@ HTMX 2.x 默认不会 swap 422。若项目约定校验失败返回 422 + 表单 
 
 ## 5. 真实页面验证
 
-起服务后选择 **Playwright 脚本或 Playwright MCP** 执行交互。官方 `webapp-testing` skill 使用原生 Python Playwright，不依赖 MCP；团队应选能留存和重复执行断言的方式。
+起服务后选择 **Playwright 脚本或 Playwright MCP** 执行交互。官方 `webapp-testing` skill 使用原生 Python Playwright，不依赖 MCP；团队应选能留存和重复执行断言的方式。模板提供可重复执行的 [htmx-check.mjs](../templates/project/scripts/htmx-check.mjs)，用法与退出码见[模板说明](../templates/README.md#htmx-页面检查脚本)。
 
 最少覆盖：
 

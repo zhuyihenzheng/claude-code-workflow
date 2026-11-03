@@ -62,7 +62,7 @@ class CopilotTests(unittest.TestCase):
             shutil.copytree(PROJECT, project)
             # 脚本复制进业务仓库后，从该仓库显式传入根目录也能工作。
             script = project / 'scripts/sync_rules.py'
-            script.parent.mkdir()
+            script.parent.mkdir(exist_ok=True)
             shutil.copy2(SCRIPT, script)
             rule = project / '.claude/rules/htmx.md'
             rule.write_bytes(rule.read_bytes() + '\n- 新增规则：验证失败必须报告。\n'.encode('utf-8'))
