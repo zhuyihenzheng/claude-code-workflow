@@ -9,3 +9,4 @@
 - settings のパス別ルールはプロセスの隔離を保証しない。Bash スクリプト、MCP、hooks の権限は別途管理する。マイグレーションのディレクトリには ask を使用し、新規追加時にも確認を必要とする。
 - Hooks：このテンプレートでは hooks を有効にしておらず、セッション終了時の自動コンパイルは行わない。`.claude/hooks/verify-stop.py` は macOS/Linux/WSL 向けの任意の参考サンプルであり、有効にする場合は Stop への登録が必要。ネイティブ Windows では書き換えが必要となる。
 - MCP：必要に応じて `.mcp.json` をマージし、`/mcp` で接続を確認する。使用しないサーバーは削除し、API キー・秘密鍵などの認証情報は環境変数で渡す。
+- Excel 設計書：`Read(/**/*.xlsx)` / `Read(/**/*.xlsm)` は deny。`python scripts/xlsx2ai.py`（初回のみ `pip install "exstruct==0.9.0" "excel2md==2.3.0"`、Python 3.11+）で `specs-ai/` を生成し、`specs-ai/index.md` → 必要なシートの JSON／`flows/*.mmd` の順に読む。
