@@ -1,1 +1,3 @@
 PyYAML==6.0.2
+exstruct==0.9.0
+excel2md==2.3.0

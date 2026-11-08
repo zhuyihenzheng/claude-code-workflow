@@ -15,7 +15,9 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 5
+    timeout-minutes: 10
+    env:
+      XLSX2AI_REQUIRED: '1'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

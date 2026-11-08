@@ -33,6 +33,8 @@
       "Edit(/**/.env.*)",
       "Edit(/**/*credentials*)",
       "Edit(/**/*secret*)",
+      "Read(/**/*.xlsx)",
+      "Read(/**/*.xlsm)",
       "Bash(rm -rf /*)",
       "Bash(git push --force *)"
     ],

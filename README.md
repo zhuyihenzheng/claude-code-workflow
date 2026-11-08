@@ -25,6 +25,7 @@
 | [07 · 避坑清单](docs/07-避坑清单.md) | 可复现的模板陷阱、版本核对与证据纪律 |
 | [08 · 参考来源](docs/08-参考来源.md) | 一手依据、校验工具与证据边界 |
 | [09 · 审查与修复](docs/09-审查与修复.md) | 原版问题、修复内容、验证结果与剩余限制 |
+| [11 · Excel 设计书](docs/11-Excel设计书.md) | 省 token 的读取方案：工具实测比较、`xlsx2ai.py` 增量转换（sheet JSON + Mermaid 流程图）、MCP 的定位 |
 | [templates/](templates/) | AGENTS.md、精简 CLAUDE.md、Copilot 仓库/路径指令、settings、rules、子代理、skill、MCP、workflow 与 [HTMX 页面检查脚本](templates/project/scripts/htmx-check.mjs)；路径规则由 [同步脚本](scripts/sync_rules.py) 生成，[安装脚本](scripts/install.py) 非破坏性合并到目标项目 |
 | [templates/user/](templates/user/README.md) | 个人级（`~/.claude`）推荐：插件 / mods 安装清单、3 个中文触发的通用 skill |
 
