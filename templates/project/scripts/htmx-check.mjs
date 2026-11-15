@@ -9,10 +9,17 @@
 //     --expect "#order-form" --contains "登録しました" --absent "ログイン" \
 //     --screenshot target/htmx-check/order-success.png
 //
+// ログインが必要な画面は、合成データのテストアカウントで保存したログイン状態を渡す：
+//   npx playwright codegen --save-storage=target/htmx-check/state.json http://localhost:8080/login
+//   node scripts/htmx-check.mjs --storage-state target/htmx-check/state.json ...
+// セッション失効時の確認は --clear-cookies を追加する（画面表示後、操作の直前に Cookie を削除する）：
+//   ... --storage-state target/htmx-check/state.json --clear-cookies --absent "ログイン"
+// 保存したログイン状態には Cookie が含まれるため、リポジトリにコミットしない。
+//
 // 終了コード：0 = 合格、1 = アサーション失敗、2 = 引数／起動エラー（検証未完了）。
 // 1 回の実行で 1 つの操作を検証する。正常送信・入力チェックエラー・セッション失効は別々に実行する。
 import { createRequire } from 'node:module';
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { parseArgs } from 'node:util';
 
@@ -25,7 +32,8 @@ const HTTP_STATUS_LOG = /^Failed to load resource: the server responded with a s
 
 const USAGE = `usage: node scripts/htmx-check.mjs --url URL --click SELECTOR --expect SELECTOR
          [--fill SELECTOR=VALUE]... [--contains TEXT] [--absent TEXT]...
-         [--screenshot PATH] [--timeout MS] [--allow-console-error TEXT]...`;
+         [--screenshot PATH] [--timeout MS] [--allow-console-error TEXT]...
+         [--storage-state PATH] [--clear-cookies]`;
 
 class Incomplete extends Error {}
 
@@ -49,6 +57,8 @@ function parseOptions(argv) {
         screenshot: { type: 'string' },
         timeout: { type: 'string', default: '10000' },
         'allow-console-error': { type: 'string', multiple: true, default: [] },
+        'storage-state': { type: 'string' },
+        'clear-cookies': { type: 'boolean', default: false },
         help: { type: 'boolean', default: false },
       },
     }).values;
@@ -61,6 +71,9 @@ function parseOptions(argv) {
   }
   for (const key of ['url', 'click', 'expect']) {
     if (!parsed[key]) fail(2, `--${key} is required\n${USAGE}`);
+  }
+  if (parsed['storage-state'] && !existsSync(parsed['storage-state'])) {
+    fail(2, `検証未完了：--storage-state のファイルがありません：${parsed['storage-state']}`);
   }
   const timeout = Number(parsed.timeout);
   if (!Number.isInteger(timeout) || timeout <= 0) fail(2, '--timeout must be a positive integer (ms)');
@@ -95,7 +108,13 @@ async function main() {
 
   const problems = [];
   try {
-    const page = await browser.newPage();
+    let context;
+    try {
+      context = await browser.newContext(options['storage-state'] ? { storageState: options['storage-state'] } : {});
+    } catch (error) {
+      throw new Incomplete(`検証未完了：--storage-state を読み込めません：${error.message.split('\n')[0]}`);
+    }
+    const page = await context.newPage();
     page.setDefaultTimeout(options.timeout);
     const consoleErrors = [];
     page.on('console', (message) => {
@@ -143,6 +162,8 @@ async function main() {
     if (!problems.length) {
       for (const [selector, value] of options.fills) await page.fill(selector, value);
       await page.evaluate(() => { window.__htmxCheckSwaps = 0; });
+      // Session expiry: the page was rendered while signed in, the request is sent without the session.
+      if (options['clear-cookies']) await context.clearCookies();
       await page.click(options.click);
       try {
         // A swap must happen (htmx:afterSwap or changed content) so that text that was

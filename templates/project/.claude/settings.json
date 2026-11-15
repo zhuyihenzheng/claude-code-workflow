@@ -36,7 +36,12 @@
       "Read(/**/*.xlsx)",
       "Read(/**/*.xlsm)",
       "Bash(rm -rf /*)",
-      "Bash(git push --force *)"
+      "Bash(git push --force *)",
+      "Bash(git push -f *)",
+      "Bash(git push * --force)",
+      "Bash(git push * --force *)",
+      "Bash(git push * -f)",
+      "Bash(git push * -f *)"
     ],
     "ask": [
       "Edit(/src/main/resources/db/migration/**)"

@@ -25,6 +25,16 @@ def workflow(name):
     return yaml.load((PROJECT / '.github/workflows' / name).read_text(encoding='utf-8'), Loader=yaml.BaseLoader)
 
 
+def rule_matches(pattern, command):
+    """Bash permission rule matching as documented at code.claude.com/docs/en/permissions:
+    the rule matches the whole command, '*' stands for any text, and a single trailing
+    ' *' also matches the bare command."""
+    regex = '.*'.join(re.escape(part) for part in pattern.split('*'))
+    if re.fullmatch(regex, command):
+        return True
+    return pattern.count('*') == 1 and pattern.endswith(' *') and command == pattern[:-2]
+
+
 class TemplateTests(unittest.TestCase):
     def test_installed_files_have_no_chinese_simplified_characters(self):
         # Everything the installer copies into a (Japanese) target project, scripts included.
@@ -32,7 +42,6 @@ class TemplateTests(unittest.TestCase):
         # 面, 行, 写, 数, 要, 内 and 容 must remain valid in Japanese templates.
         simplified_only = set('们这么个进还时说对过门问题应该实现设计测试检查运页开发编译错误关闭删读认证输据库处选择务环变权规间仅块单规则镜')
         installed = [path for path in PROJECT.rglob('*') if path.is_file() and '__pycache__' not in path.parts]
-        installed.append(ROOT / 'scripts/sync_rules.py')
         self.assertGreater(len(installed), 15)
         for path in installed:
             with self.subTest(path=path.relative_to(ROOT).as_posix()):
@@ -76,6 +85,26 @@ class TemplateTests(unittest.TestCase):
             self.assertIn(tool + '(/**/.env.*)', config['deny'])
             self.assertNotIn(tool + '(/.env)', config['deny'])
             self.assertNotIn(tool + '(/.env.*)', config['deny'])
+
+    def test_force_push_deny_rules_cover_common_spellings(self):
+        # rule_matches() follows the documented Bash rule semantics; it is not Claude Code's
+        # permission engine, so this guards the rule text, not the product's behaviour.
+        deny = json.loads((PROJECT / '.claude/settings.json').read_text(encoding='utf-8'))['permissions']['deny']
+        rules = [rule[5:-1] for rule in deny if rule.startswith('Bash(git push')]
+
+        def denied(command):
+            return any(rule_matches(rule, command) for rule in rules)
+
+        for command in ('git push --force', 'git push --force origin main', 'git push -f', 'git push -f origin main',
+                        'git push origin main --force', 'git push origin --force main',
+                        'git push origin main -f', 'git push origin -f main'):
+            with self.subTest(command=command):
+                self.assertTrue(denied(command))
+        for command in ('git push', 'git push origin main', 'git push -u origin feature/x',
+                        'git push --force-with-lease', 'git push origin feature/x --force-with-lease',
+                        'git push origin fix-form', 'git push --follow-tags'):
+            with self.subTest(command=command):
+                self.assertFalse(denied(command))
 
     def test_mentions_are_separate_from_pr_automation(self):
         data = workflow('claude.yml')

@@ -11,7 +11,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 PROJECT = ROOT / 'templates/project'
-SCRIPT = ROOT / 'scripts/sync_rules.py'
+SCRIPT = PROJECT / 'scripts/sync_rules.py'
 
 
 def run_sync(*args, script=SCRIPT, cwd=ROOT):
@@ -60,10 +60,8 @@ class CopilotTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             project = Path(directory) / '测试 project'
             shutil.copytree(PROJECT, project)
-            # 脚本复制进业务仓库后，从该仓库显式传入根目录也能工作。
+            # 脚本随模板复制进业务仓库后，显式传入根目录也能工作。
             script = project / 'scripts/sync_rules.py'
-            script.parent.mkdir(exist_ok=True)
-            shutil.copy2(SCRIPT, script)
             rule = project / '.claude/rules/htmx.md'
             rule.write_bytes(rule.read_bytes() + '\n- 新增规则：验证失败必须报告。\n'.encode('utf-8'))
             target = project / '.github/instructions/htmx.instructions.md'
@@ -77,6 +75,19 @@ class CopilotTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertIn('新增规则', target.read_text(encoding='utf-8'))
             self.assertNotIn(b'\r', target.read_bytes())
+
+    def test_copied_script_defaults_to_its_own_project(self):
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory) / 'project'
+            shutil.copytree(PROJECT, project)
+            target = project / '.github/instructions/jsp.instructions.md'
+            target.unlink()
+            script = project / 'scripts/sync_rules.py'
+            # No argument and an unrelated cwd: the script works on the project it lives in.
+            self.assertEqual(run_sync('--check', script=script, cwd=directory).returncode, 1)
+            self.assertEqual(run_sync(script=script, cwd=directory).returncode, 0)
+            self.assertTrue(target.is_file())
+            self.assertEqual(run_sync('--check').returncode, 0, 'the template itself must be untouched')
 
     def test_missing_mirror_is_detected_and_created(self):
         with tempfile.TemporaryDirectory() as directory:
