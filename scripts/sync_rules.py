@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""单向同步路径规则，仅用标准库；输入采用 paths: 块列表，输出 UTF-8 / LF。"""
+"""パス別ルールを .claude/rules/ から .github/instructions/ へ一方向に生成する。
+
+    python3 scripts/sync_rules.py [PROJECT_ROOT] [--check]
+
+標準ライブラリのみを使用する。入力の frontmatter は paths: のブロックリストに限り、
+出力は UTF-8 / LF とする。--check は書き込まずに差分を報告し、差分があれば終了コード 1、
+入力が不正な場合は終了コード 2 を返す。
+"""
 
 import argparse
 import json
@@ -49,7 +56,7 @@ def sync(project, check=False):
     if not rules.is_dir():
         raise ValueError(f'{rules}: source rules directory does not exist')
     output = project / '.github/instructions'
-    # 全部解析成功后才写入，避免不支持的 frontmatter 留下半套镜像。
+    # Render everything before writing, so an unsupported frontmatter leaves no half-written mirror set.
     expected = {output / f'{source.stem}.instructions.md': render_rule(source)
                 for source in sorted(rules.glob('*.md'))}
     changed = False
@@ -61,7 +68,7 @@ def sync(project, check=False):
         if not check:
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(content.encode('utf-8'))
-    # 仅清理带本脚本标记的过期镜像，保留目标项目自行维护的其他指令。
+    # Remove only stale mirrors that carry this script's marker; the project's own instructions stay.
     for target in sorted(output.glob('*.instructions.md')):
         if target not in expected and target.read_text(encoding='utf-8').startswith('---\n' + GENERATED):
             changed = True
@@ -72,10 +79,10 @@ def sync(project, check=False):
 
 
 def main():
-    # 重定向到管道时 Windows 可能使用本地编码，统一日志编码以支持中文路径。
+    # A redirected stream on Windows may use the local code page; force UTF-8 so non-ASCII paths print.
     sys.stdout.reconfigure(encoding='utf-8')
     sys.stderr.reconfigure(encoding='utf-8')
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument('project_root', nargs='?', type=Path, default=DEFAULT_PROJECT,
                         help='project root (default: templates/project next to scripts/)')
     parser.add_argument('--check', action='store_true', help='report drift without writing; exit 1 on drift')
