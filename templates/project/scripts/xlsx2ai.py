@@ -11,6 +11,9 @@
     OUT_DIR/<book>/flows/<sheet>.mmd     図形＋コネクタで描かれたフロー図（excel2md）
     OUT_DIR/<book>/media/*           --extract-media 指定時のみ：貼り付け画像（フロー図の画像など）
 
+同じ名前のブック（a.xlsx と a.xlsm、大文字・小文字だけが異なる名前）は、出力先を
+<book>-xlsx / <book>-xlsm として区別する。それでも重複する場合は終了コード 2 を返す。
+
 変換はローカルで行い、モデルのトークンは消費しない。SHA-256 が変わったブックだけを
 再変換し、削除されたブックの出力も削除する。--check は書き込まずに古い出力を報告し、
 古いものがあれば終了コード 1 を返す（CI 用）。
@@ -27,6 +30,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import xml.etree.ElementTree as ET
 import zipfile
 
 SUFFIXES = {'.xlsx', '.xlsm'}
@@ -70,9 +74,26 @@ def sha256(path):
     return digest.hexdigest()
 
 
-def book_key(src, path):
-    """Stable output directory name: relative path without suffix, '/' kept as folders."""
-    return path.relative_to(src).with_suffix('').as_posix()
+def book_keys(src, paths):
+    """Map a stable output directory name to each workbook: its relative path without
+    the suffix, '/' kept as folders. Books that would share a directory (a.xlsx next to
+    a.xlsm, or names differing only in case) get '-xlsx' / '-xlsm' appended instead, so
+    none is dropped. The suffix is not kept as '.xlsx': Read(/**/*.xlsx) is denied."""
+    def stem(path):
+        return path.relative_to(src).with_suffix('').as_posix()
+    shared = {}
+    for path in paths:
+        shared.setdefault(stem(path).casefold(), []).append(path)
+    keys = {}
+    for path in paths:
+        key = stem(path)
+        if len(shared[key.casefold()]) > 1:
+            key += '-' + path.suffix[1:].lower()
+        clash = next((other for other in keys if other.casefold() == key.casefold()), None)
+        if clash is not None:
+            raise ConversionError(f'出力先が重複します：{keys[clash]} と {path}。どちらかのファイル名を変更してください。')
+        keys[key] = path
+    return keys
 
 
 def find_books(src):
@@ -82,7 +103,6 @@ def find_books(src):
 
 def _rels(zf, part):
     """Map relationship id -> target part path for an OOXML part."""
-    import xml.etree.ElementTree as ET
     pure = PurePosixPath(part)
     rels_path = str(pure.parent / '_rels' / (pure.name + '.rels'))
     if rels_path not in zf.namelist():
@@ -100,7 +120,6 @@ def _rels(zf, part):
 
 def inspect_drawings(path):
     """Return {sheet name: {"shapes": n, "connectors": n, "pictures": n}} from DrawingML parts."""
-    import xml.etree.ElementTree as ET
     stats = {}
     with zipfile.ZipFile(path) as zf:
         workbook = ET.fromstring(zf.read('xl/workbook.xml'))
@@ -224,7 +243,7 @@ def run(src, out, check=False, extract_media=False, log=print):
     if not src.is_dir():
         raise ConversionError(f'入力ディレクトリがありません：{src}')
     manifest = load_manifest(out)
-    books = {book_key(src, p): p for p in find_books(src)}
+    books = book_keys(src, find_books(src))
     stale, failures = [], []
     for key, path in books.items():
         digest = sha256(path)

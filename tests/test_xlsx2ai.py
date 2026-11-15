@@ -123,6 +123,39 @@ class Xlsx2AiTests(unittest.TestCase):
         self.assertFalse((book / 'flows').exists())
         self.assertFalse((book / 'media').exists())
 
+    def test_books_sharing_a_name_are_all_converted(self):
+        # a.xlsx and a.xlsm used to map to the same output directory; one was dropped silently.
+        make_book(self.src / '設計書.xlsx')
+        make_book(self.src / '設計書.xlsm')
+        make_book(self.src / 'db' / '単独.xlsx')
+        code, log = run(self.src, self.out)
+        self.assertEqual(code, 0, log)
+        self.assertIn('3 ブック中 3 件を変換', log)
+        for name in ('設計書-xlsx', '設計書-xlsm', 'db/単独'):
+            self.assertTrue((self.out / name / 'sheets' / '表紙.json').is_file(), name)
+        self.assertFalse((self.out / '設計書').exists())
+        root_index = (self.out / 'index.md').read_text(encoding='utf-8')
+        self.assertIn('| 設計書.xlsx | [設計書-xlsx/index.md]', root_index)
+        self.assertIn('| 設計書.xlsm | [設計書-xlsm/index.md]', root_index)
+        self.assertEqual(run(self.src, self.out, '--check')[0], 0)
+        # No output directory may end in a suffix that the template settings deny reading.
+        self.assertFalse([p for p in self.out.rglob('*') if p.is_dir() and p.suffix.lower() in xlsx2ai.SUFFIXES])
+        # Removing one of the pair frees the plain name again; the stale directories go away.
+        (self.src / '設計書.xlsm').unlink()
+        code, log = run(self.src, self.out)
+        self.assertEqual(code, 0, log)
+        self.assertTrue((self.out / '設計書' / 'index.md').is_file())
+        self.assertFalse((self.out / '設計書-xlsx').exists())
+        self.assertFalse((self.out / '設計書-xlsm').exists())
+
+    def test_unresolvable_output_name_clash_is_an_error(self):
+        src = Path('specs')
+        paths = [src / 'a.xlsx', src / 'a.xlsm', src / 'a-xlsx.xlsx']
+        with self.assertRaises(xlsx2ai.ConversionError):
+            xlsx2ai.book_keys(src, paths)
+        self.assertEqual(set(xlsx2ai.book_keys(src, paths[:2])), {'a-xlsx', 'a-xlsm'})
+        self.assertEqual(set(xlsx2ai.book_keys(src, [src / 'A.xlsx', src / 'sub/a.xlsx'])), {'A', 'sub/a'})
+
     def test_shape_flowchart_becomes_mermaid_with_all_edges(self):
         make_book(self.src / 'flow.xlsx', flow_on_sheet='テーブル一覧')
         code, log = run(self.src, self.out)

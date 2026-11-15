@@ -43,7 +43,9 @@ python scripts/xlsx2ai.py --check                  # CI：有过期或多余输�
 python scripts/xlsx2ai.py specs specs-ai --extract-media
 ```
 
-退出码：`0` 正常；`1` `--check` 发现过期；`2` 参数/依赖错误或有书转换失败（其他书照常转换，失败的书保持过期）。
+退出码：`0` 正常；`1` `--check` 发现过期；`2` 参数/依赖错误、输出目录名无法区分，或有书转换失败（其他书照常转换，失败的书保持过期）。
+
+输出目录名是原本去掉后缀的相对路径。`a.xlsx` 与 `a.xlsm` 并存（或文件名只差大小写）时，目录名改为 `a-xlsx` / `a-xlsm`，两本都会转换；目录名不保留 `.xlsx`，因为 settings 会 deny 读取它。
 
 ## 3. 需要人工处理的部分
 
