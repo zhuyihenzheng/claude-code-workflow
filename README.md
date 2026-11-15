@@ -1,8 +1,14 @@
 # Claude Code 开发 AI 工作流搭建手册
 
-> 面向 **Java + Spring Boot 后端 / JSP、HTMX 或两者并用** 项目的 Claude Code 团队工作流，支持与 GitHub Copilot 共用一份 AGENTS.md：总体规划、搭建步骤、标准开发回路、工具箱选型与可直接套用的模板。
->
-> 文档与模板于 2026-10-31 完成一次源码审查与修订。它是一份可适配的手册，不是已在目标项目运行通过的插件；平台、版本、账号和依赖前提见 [模板说明](templates/README.md)，问题与验证边界见 [审查记录](docs/09-审查与修复.md) 和 [PR 指摘对应](docs/10-PR指摘对应.md)。
+[![Validate templates](https://github.com/zhuyihenzheng/claude-code-workflow/actions/workflows/validate.yml/badge.svg)](https://github.com/zhuyihenzheng/claude-code-workflow/actions/workflows/validate.yml)
+
+面向 **Java + Spring Boot 后端 / JSP、HTMX 或两者并用** 项目的 Claude Code 团队工作流，与 GitHub Copilot 共用一份 AGENTS.md。仓库包含三部分：
+
+- **手册**（[docs/](docs/)，中文）：规划、搭建、标准回路、工具选型、避坑；
+- **项目模板**（[templates/project/](templates/project/)，日文，面向日本团队）：规则、权限、子代理、skill、MCP、workflow 与两个验证脚本；
+- **安装脚本**（[scripts/install.py](scripts/install.py)）：把模板非破坏性地合并进已有项目。
+
+它是可适配的起点，不是装上即用的插件：模板在 CI 的示例应用上跑通，你的业务项目仍需自行验收。已验证与未验证的范围见[验证范围](#验证范围)。
 
 ## 一句话结论
 
@@ -24,9 +30,10 @@
 | [06 · 团队协作与 CI](docs/06-团队协作与ci.md) | Copilot 与 Claude Code 共存、多系统推广、GitHub 集成（@claude / Code Review）、AI 代码 review 政策 |
 | [07 · 避坑清单](docs/07-避坑清单.md) | 可复现的模板陷阱、版本核对与证据纪律 |
 | [08 · 参考来源](docs/08-参考来源.md) | 一手依据、校验工具与证据边界 |
-| [09 · 审查与修复](docs/09-审查与修复.md) | 原版问题、修复内容、验证结果与剩余限制 |
+| [09 · 审查与修复](docs/09-审查与修复.md) | 按轮次记录的问题、修复、验证结果与剩余限制（历史记录，只追加） |
+| [10 · PR 指摘对应](docs/10-PR指摘对应.md) | PR #1 的 10 条 review 逐条对应，作为“修复后交给 Claude 复审”的实例 |
 | [11 · Excel 设计书](docs/11-Excel设计书.md) | 省 token 的读取方案：工具实测比较、`xlsx2ai.py` 增量转换（sheet JSON + Mermaid 流程图）、MCP 的定位 |
-| [templates/](templates/) | AGENTS.md、精简 CLAUDE.md、Copilot 仓库/路径指令、settings、rules、子代理、skill、MCP、workflow 与 [HTMX 页面检查脚本](templates/project/scripts/htmx-check.mjs)；路径规则由 [同步脚本](scripts/sync_rules.py) 生成，[安装脚本](scripts/install.py) 非破坏性合并到目标项目 |
+| [templates/](templates/README.md) | 模板的前置条件、安装规则、权限语义、可选 hook 与 workflow 的说明 |
 | [templates/user/](templates/user/README.md) | 个人级（`~/.claude`）推荐：插件 / mods 安装清单、3 个中文触发的通用 skill |
 
 ## 分阶段落地路线图（摘要）
@@ -42,23 +49,49 @@
 ## 快速安装到已有项目
 
 ```bash
-python3 scripts/install.py project /path/to/your-project          # 预演：create / merge / skip / conflict
-python3 scripts/install.py project /path/to/your-project --apply  # 只写入 create 与 merge
+python3 scripts/install.py project /path/to/your-project          # 预演：只打印计划，不写文件
+python3 scripts/install.py project /path/to/your-project --diff   # 预演，并打印与已有文件的差异
+python3 scripts/install.py project /path/to/your-project --apply  # 写入
 python3 scripts/install.py user --apply                           # 个人级 skills → ~/.claude/skills
 ```
 
-脚本不覆盖已有文件：settings / `.mcp.json` 做规则并集，`.gitignore` / `.gitattributes` 追加缺失行，其余差异列为 conflict 由人工合并。详见[模板说明](templates/README.md#安装与适配)。
+脚本不覆盖、不删除已有文件：settings / `.mcp.json` 做规则并集，`.gitignore` / `.gitattributes` 只补缺失行，其余内容不同的文件列为 `conflict` 留给人工合并，目标文件是符号链接时不写穿。GitHub workflows 提交后即生效且需要密钥，默认不安装，加 `--with-workflows` 才复制。规则详见[模板说明](templates/README.md#安装与适配)。
 
-## 模板验证
+安装后目标项目多出：
+
+```
+AGENTS.md                         项目规则的唯一事实来源（Copilot 与 Claude Code 共用），填写“本システム固有情報”
+CLAUDE.md                         @AGENTS.md + Claude Code 专属补充
+.claude/settings.json             权限：精确的 mvnw 命令 allow，.env / 凭据 / xlsx deny，迁移目录 ask
+.claude/rules/{jsp,htmx}.md       按路径加载的页面规则
+.claude/agents/code-reviewer.md   只读评审子代理
+.claude/skills/spring-endpoint/   新增接口 / 页面片段的标准流程
+.claude/hooks/verify-stop.py      Stop hook 参考样例（未注册）
+.claude/README.md                 给人看的配置说明（不进会话上下文）
+.github/copilot-instructions.md   Copilot 入口摘要
+.github/instructions/             由 rules 生成的 Copilot 路径指令
+.mcp.json                         Context7 + 隔离的 Playwright
+scripts/sync_rules.py             rules → Copilot 指令的同步与 --check
+scripts/htmx-check.mjs            真实浏览器验证 HTMX 片段替换
+scripts/xlsx2ai.py                Excel 设计书 → 按 sheet 拆分的 JSON / Mermaid
+.gitignore / .gitattributes       补充缺失规则
+```
+
+## 验证范围
 
 ```bash
-python3 -m pip install -r requirements-dev.txt
+python3 -m pip install -r requirements-dev.txt     # Python 3.11+
 python3 -m unittest discover -s tests -v
 ```
 
-测试使用模拟 Maven，不调用 Claude API。真实项目的构建、页面、MCP 与 GitHub App 仍需独立验收。
+| 已在 CI 验证 | 未验证，需在目标环境验收 |
+|---|---|
+| 模板内容、安装脚本、规则同步、Excel 转换：Linux / macOS / Windows | 真实业务项目（多模块、Spring Security/CSRF、外部 Tomcat/WAR） |
+| `htmx-check.mjs`：真实 htmx 与 Chromium（Ubuntu） | 原生 Windows 上的 Claude Code、Maven 与 MCP |
+| 安装 → `./mvnw verify` → 页面检查：真实 Spring Boot + JSP + HTMX 示例应用（Ubuntu） | Claude Code 会话实际加载情况、GitHub App 与付费 Action |
+| Stop hook 参考样例：模拟与真实 Maven（仅 POSIX） | Copilot 各入口是否读取 AGENTS.md 与路径指令 |
 
-模板提供原生 Windows 的 `mvnw.cmd` 命令、权限与换行配置，CI 矩阵包含 Windows；真实 Windows 集成仍待验收。`verify-stop.py` 原样保留为可选的 macOS/Linux/WSL 参考样例，未注册；需要时由用户自行添加 Stop hook，示例见[模板说明](templates/README.md)。Windows 搭建见 [02 · 基础搭建](docs/02-基础搭建.md#6-windows-两条路径)。
+本地测试不调用 Claude API；缺少 Playwright 时浏览器测试会跳过，CI 中强制执行。逐轮的问题与修复记录见 [09 · 审查与修复](docs/09-审查与修复.md)，Windows 搭建见 [02 · 基础搭建](docs/02-基础搭建.md#6-windows-两条路径)。
 
 ## 许可证
 

@@ -26,12 +26,16 @@ def workflow(name):
 
 
 class TemplateTests(unittest.TestCase):
-    def test_project_markdown_has_no_chinese_simplified_characters(self):
+    def test_installed_files_have_no_chinese_simplified_characters(self):
+        # Everything the installer copies into a (Japanese) target project, scripts included.
         # Use simplified forms absent from normal Japanese; shared kanji such as
         # 面, 行, 写, 数, 要, 内 and 容 must remain valid in Japanese templates.
-        simplified_only = set('们这么个进还时说对过门问题应该实现设计测试检查运页开发编译错误关闭删读认证输据库处选择务环变权规间')
-        for path in markdown_files(PROJECT):
-            with self.subTest(path=path.relative_to(PROJECT)):
+        simplified_only = set('们这么个进还时说对过门问题应该实现设计测试检查运页开发编译错误关闭删读认证输据库处选择务环变权规间仅块单规则镜')
+        installed = [path for path in PROJECT.rglob('*') if path.is_file() and '__pycache__' not in path.parts]
+        installed.append(ROOT / 'scripts/sync_rules.py')
+        self.assertGreater(len(installed), 15)
+        for path in installed:
+            with self.subTest(path=path.relative_to(ROOT).as_posix()):
                 found = sorted(simplified_only.intersection(path.read_text(encoding='utf-8')))
                 self.assertFalse(found, f'Chinese simplified characters remain: {"".join(found)}')
 

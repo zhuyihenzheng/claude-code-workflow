@@ -7,7 +7,7 @@
 ## 前置条件与适用范围
 
 - 模板支持 macOS / Linux / WSL 与原生 Windows 的命令和权限配置；目标项目需有 JDK、`pom.xml` 与 Maven Wrapper（`mvnw` / `mvnw.cmd`）。Windows 安装步骤见 [基础搭建](../docs/02-基础搭建.md#6-windows-两条路径)。
-- 模板不启用任何 hooks，结束会话不会自动编译。保留的 `.claude/hooks/verify-stop.py` 是可选的 macOS / Linux / WSL 参考样例，需要 Python 3.9+ 和可执行 `mvnw`；它使用 POSIX 进程组，不能在原生 Windows 使用，留给用户按需改写。
+- 模板不注册任何 hook，结束会话不会自动编译；`.claude/hooks/verify-stop.py` 只是未注册的参考样例，见[下文](#可选-stop-hook-参考样例默认不启用)。
 - Playwright MCP：Node.js / npx、浏览器安装条件；启动后在 `/mcp` 确认连接。
 - 先记录 `claude --version`，用 `/doctor`、`/permissions`、`/hooks` 检查配置。模板测试不等于在每个 Claude Code 版本上验证过。
 - 规则同步脚本需要 Python 3.9+，仅使用标准库；原生 Windows 的 Python 命令可用 `py` 或已安装的 `python`。
@@ -15,19 +15,32 @@
 
 ## 安装与适配
 
-1. 按相对路径合并 `project/AGENTS.md`、`project/CLAUDE.md`、`project/.claude/`、`project/.github/copilot-instructions.md`、`project/.github/instructions/`、`project/.gitignore` 与 `project/.gitattributes` 到目标项目；再把本仓库的 [scripts/sync_rules.py](../scripts/sync_rules.py) 复制到目标项目的 `scripts/sync_rules.py`。已有文件逐项合并，不要整目录覆盖。复制文件不会注册 hook。推荐用 [安装脚本](../scripts/install.py) 一次完成以上复制并预演合并（Python 3.9+，跨平台）：
+1. 用[安装脚本](../scripts/install.py)把 `project/` 合并到目标项目（Python 3.9+，跨平台）。它同时把 [scripts/sync_rules.py](../scripts/sync_rules.py) 复制到目标项目的 `scripts/`。
 
    ```bash
-   python3 scripts/install.py project /path/to/your-project          # 预演，只打印计划
-   python3 scripts/install.py project /path/to/your-project --apply  # 写入 create / merge
+   python3 scripts/install.py project /path/to/your-project                   # 预演，只打印计划
+   python3 scripts/install.py project /path/to/your-project --diff            # 预演，并打印每个 conflict 的差异
+   python3 scripts/install.py project /path/to/your-project --apply           # 写入 create / merge
+   python3 scripts/install.py project /path/to/your-project --apply --with-workflows   # 连同 GitHub workflows
    ```
 
-   规则：目标缺失的文件原样复制（`create`，含 `scripts/sync_rules.py`）；内容相同跳过（`skip`）；`.claude/settings.json` 与 `.mcp.json` 只追加缺失的 allow/deny/ask 规则与 MCP server，已有值优先，不会写入 `hooks`（`merge`，JSON 会按 2 空格重新格式化）；`.gitignore` / `.gitattributes` 只追加缺失行并保留原换行；其余不同的文件（AGENTS.md、CLAUDE.md、rules、workflow 等）报告为 `conflict`，**不改动**，需手动对比。已有的 `Bash(./mvnw *)` 等宽泛规则或与模板 deny/ask 冲突的 allow 会在输出中提示。脚本不删除任何文件，合并后仍须 `git diff` 审查再提交。
-2. AGENTS.md 的“チーム共通ルール”跨系统原样复制；只在“本システム固有情報”填写 JSP / HTMX / 两者并用、版本、样例路径、启动方式与测试类。MyBatis 项目保留 Mapper，不引入 JPA；外部 Tomcat/WAR 使用自己的部署命令。CLAUDE.md 保持 `@AGENTS.md` 导入，只放 Claude Code 配置入口。
+   | 输出 | 条件 | 处理 |
+   |---|---|---|
+   | `create` | 目标没有该文件 | 原样复制 |
+   | `skip` | 内容相同 | 不动 |
+   | `merge` | `.claude/settings.json`、`.mcp.json` | 只追加缺失的 allow/deny/ask 规则与 MCP server，已有值优先，不写入 `hooks`；JSON 按 2 空格重新格式化 |
+   | `merge` | `.gitignore` | 缺失行插到文件开头，已有规则在后、继续优先（追加到末尾会让模板的 `.env.*` 盖掉已有的 `!.env.example`）；保留原换行 |
+   | `merge` | `.gitattributes` | 缺失行追加到末尾，使 `mvnw` 等具体规则盖过 `* text=auto` 这类泛规则；同模式被覆盖时提示 |
+   | `conflict` | 其余内容不同的文件，以及目标文件本身是符号链接（含悬空链接）或目录 | **不改动**，用 `--diff` 对比后手动合并。路径中间的目录链接（如共享的 `.claude/`）会照常跟随并写入其指向的目录 |
+   | `optional` | `.github/workflows/` 下目标尚不存在的文件 | 默认不安装，见下文 [GitHub workflows](#github-workflows) |
+   | `error` | 写入失败（例如路径上有同名文件） | 其余文件照常写入，退出码 1 |
+
+   已有的 `Bash(./mvnw *)` 等宽泛规则或与模板 deny/ask 冲突的 allow 会在输出中提示。脚本不删除任何文件，合并后仍须 `git diff` 审查再提交。不用脚本时按相同规则逐项手动合并，不要整目录覆盖。
+2. AGENTS.md 的“チーム共通ルール”跨系统原样复制；只在“本システム固有情報”填写 JSP / HTMX / 两者并用、版本、样例路径、启动方式与测试类。MyBatis 项目保留 Mapper，不引入 JPA；外部 Tomcat/WAR 使用自己的部署命令。CLAUDE.md 保持 `@AGENTS.md` 导入，只放 agent 需要的 Claude Code 补充；给人看的配置说明在 [`.claude/README.md`](project/.claude/README.md)（日文，不会加载进会话）。
 3. 手动运行目标项目的 `./mvnw -q compile`、相关测试和 `./mvnw verify`；Windows CMD 用 `mvnw.cmd`，Git Bash 用 `./mvnw.cmd`，PowerShell 用 `.\mvnw.cmd`，参数相同。先解决环境问题，再考虑可选 hook。
 4. 按需合并 `.mcp.json`。默认只有 Context7（无密钥公共访问）和隔离 Playwright；不用的 server 直接移除。
 5. DBHub / GitHub 是 [可选配置](mcp.optional.json)。只合并需要的 server，并在启动前提供 `DATABASE_URL` / `GITHUB_PERSONAL_ACCESS_TOKEN`；DBHub 只能用开发/测试库的只读账号。Context7 需要认证时可按其官方文档加 `CONTEXT7_API_KEY` header。
-6. GitHub 集成按下面的 workflow 分别配置认证：交互模式使用 Claude GitHub App，自动评审示例使用只读 workflow token；两者都需模型凭据。不需要 GitHub 自动化就不复制它们。
+6. GitHub 集成按下面的 workflow 分别配置认证：交互模式使用 Claude GitHub App，自动评审示例使用只读 workflow token；两者都需模型凭据。安装脚本默认不复制它们，需要时加 `--with-workflows`。
 
 ## HTMX 页面检查脚本
 
@@ -84,7 +97,9 @@ Copilot 的 IDE、agent 与 code review 是否同时读取 AGENTS.md、支持哪
 
 ## 可选 Stop hook 参考样例（默认不启用）
 
-`settings.json` 没有 `hooks` 键。以下 JSON **仅供 macOS / Linux / WSL 用户自行选择启用**：先检查参考脚本和目标项目的手动编译，再将此 `hooks` 字段合并到目标 `.claude/settings.json` 的顶层（保留既有权限配置）。原生 Windows 需要用户先改写脚本的命令、信号与进程管理，不要直接启用本样例。
+`settings.json` 没有 `hooks` 键，复制模板不会注册任何 hook：参考脚本依赖 POSIX 进程组，原生 Windows 无法直接使用，而模板要同时支持两类平台；编译通过也不等于验证通过。所以验证命令显式执行、合并门禁交给 CI。本节是这件事的唯一说明，其他文档只链接到这里。
+
+`.claude/hooks/verify-stop.py` 是保留的参考样例，需要 Python 3.9+ 和可执行 `mvnw`，使用 POSIX 进程组。以下 JSON **仅供 macOS / Linux / WSL 用户自行选择启用**：先检查参考脚本和目标项目的手动编译，再将此 `hooks` 字段合并到目标 `.claude/settings.json` 的顶层（保留既有权限配置）。原生 Windows 需要用户先改写脚本的命令、信号与进程管理，不要直接启用本样例。
 
 ```json
 {
@@ -134,10 +149,10 @@ printf '%s\n' '{"stop_hook_active":false}' | python3 .claude/hooks/verify-stop.p
 
 | 文件 | 使用方式 |
 |---|---|
-| `project/.github/workflows/claude.yml` | `@claude` 评论/评审/新 issue 触发，可修改代码；默认 20 轮、5 美元、20 分钟 |
+| `project/.github/workflows/claude.yml` | `@claude` 评论/评审/新 issue 触发，可修改代码；默认 20 轮、5 美元、20 分钟。**提交后即生效**，未配置 App 与密钥时每次 `@claude` 都会触发一次失败的 job |
 | `project/.github/workflows/claude-review.yml.example` | 明确需要自动评审时才改名为 `.yml`；带独立 prompt，只评审同仓库非草稿 PR，结果在 Actions 日志；15 轮、3 美元、20 分钟 |
 
-两者保留 action 默认的触发者写权限检查与 bot 限制。预算数字是模板起点，按团队调整。美元限制不能替代账号/组织支出控制。
+安装脚本默认把两者列为 `optional` 而不复制；确认要用 GitHub 自动化后用 `--with-workflows` 安装。两者保留 action 默认的触发者写权限检查与 bot 限制。预算数字是模板起点，按团队调整。美元限制不能替代账号/组织支出控制。
 
 交互模板的 `id-token: write` 用于默认 GitHub App 认证；`additional_permissions: actions: read` 与 job 的同名权限一并配置，App 安装也须允许。自动评审模板显式传入只读 `${{ github.token }}` 作为 `github_token` 和 `GH_TOKEN`，不使用 App/OIDC；先通过 `gh pr view/diff` 检查读取权限，失败就终止，不调用模型。API key 使用 `anthropic_api_key`；订阅 OAuth 改成 `claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}`。不能只换 Secret 名而保留错误的 input。
 
@@ -150,6 +165,6 @@ python3 -m pip install -r requirements-dev.txt
 python3 -m unittest discover -s tests -v
 ```
 
-测试覆盖模拟 Maven 的成功/编译错误/环境错误/重试/超时/信号中断及子进程清理、环境变量/符号链接/空格/子目录路径，以及 JSON、workflow 关键配置、agent/skill/rule frontmatter、CLAUDE.md 行数预算、文档相对链接、AGENTS.md 分层/导入与 Copilot 规则同步，和安装脚本的预演/复制/JSON 与行合并/冲突保留/CRLF 保留。它们不调用 Claude API，不消耗模型额度。CI 的 `sample-app` job 另在真实 Spring Boot + JSP + HTMX 示例应用上执行安装、`./mvnw verify`、Stop hook 与页面检查（见[审查记录](../docs/09-审查与修复.md#第四轮真实-spring-boot--jsp--htmx-端到端验证)），但示例应用不代替你的业务项目验收。
+测试覆盖模拟 Maven 的成功/编译错误/环境错误/重试/超时/信号中断及子进程清理、环境变量/符号链接/空格/子目录路径，以及 JSON、workflow 关键配置、agent/skill/rule frontmatter、CLAUDE.md 行数预算、文档相对链接、AGENTS.md 分层/导入与 Copilot 规则同步，和安装脚本的预演/复制/JSON 与行合并/冲突保留/CRLF 保留/文件符号链接不写穿/写入失败报告/workflow 按需安装。它们不调用 Claude API，不消耗模型额度。CI 的 `sample-app` job 另在真实 Spring Boot + JSP + HTMX 示例应用上执行安装、`./mvnw verify`、Stop hook 与页面检查（见[审查记录](../docs/09-审查与修复.md#第四轮真实-spring-boot--jsp--htmx-端到端验证)），但示例应用不代替你的业务项目验收。
 
 CI 矩阵包含 Linux / macOS / Windows。`tests/test_hooks.py` 仅测试 POSIX 参考脚本，在原生 Windows 整个模块跳过；模板测试在三平台运行。Windows 本地用 `py -m pip install -r requirements-dev.txt` 和 `py -m unittest discover -s tests -v`（或对应的 `python`）。尚未在真实 Windows 验收 Claude Code、Maven 或 MCP。
