@@ -219,6 +219,19 @@ class TemplateTests(unittest.TestCase):
             with self.subTest(path=path.name):
                 self.assertTrue(frontmatter(path)['paths'])
 
+    def test_repository_skills_have_matching_frontmatter(self):
+        skills = sorted((ROOT / '.claude/skills').glob('*/SKILL.md'))
+        self.assertTrue(skills)
+        for path in skills:
+            with self.subTest(path=path.parent.name):
+                text = path.read_text(encoding='utf-8')
+                meta = yaml.safe_load(text.split('\n---', 2)[0][4:])
+                self.assertEqual(meta['name'], path.parent.name)
+                self.assertTrue(meta['description'])
+                # Every script the skill tells the agent to run must exist.
+                for script in set(re.findall(r'(\.claude/skills/[\w./-]+\.py)', text)):
+                    self.assertTrue((ROOT / script).is_file(), script)
+
     def test_no_personal_absolute_paths(self):
         for path in markdown_files(ROOT):
             with self.subTest(path=path):
