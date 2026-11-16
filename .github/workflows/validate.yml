@@ -54,6 +54,7 @@ jobs:
           .github/workflows/validate.yml
           templates/project/.github/workflows/claude.yml
           templates/project/.github/workflows/claude-review.yml.example
+          templates/project/.github/workflows/ci.yml.example
   browser:
     runs-on: ubuntu-latest
     timeout-minutes: 10
