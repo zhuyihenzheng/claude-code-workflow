@@ -20,7 +20,7 @@
 - プロジェクトルート／worktree ルートから Claude Code を起動する。`/src/...` のようなパスはそこを基準に解決される。有効な権限は `/permissions` で確認する。
 - Maven は `compile` / `test` / `verify` の完全一致のみを許可している。`Bash(./mvnw *)` のような広い許可は deploy や任意のプラグイン実行も通すため追加しない。
 - deny／ask は Claude Code の組み込みツールに対する制御であり、プロセスの隔離ではない。任意のスクリプト、MCP、hooks の権限は別途管理する（OS のサンドボックス、最小権限の認証情報）。
-- `curl` / `wget` は deny、`bypassPermissions` モード、claude.ai コネクタ、Artifact の公開は無効としている。緩める場合は社内の承認を得る。
+- `bypassPermissions` モード、claude.ai コネクタ、Artifact の公開は無効としている。有効にする場合は社内の承認を得る。外部への通信の制限は、管理者が配布するサンドボックスの許可リストで行う。
 - マイグレーションのディレクトリは deny ではなく ask としている。新規追加は確認のうえで行い、マージ済みファイルの不変性はマイグレーションツールと CI で検証する。
 
 ## Hooks

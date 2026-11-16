@@ -54,13 +54,13 @@
 | 設定 | 内容 |
 |---|---|
 | allow | `mvnw` の `compile` / `test` / `verify` の完全一致、`git status` / `diff` / `log`、`gh pr view` / `gh issue view` のみ |
-| deny | `.env*`、ファイル名に `credentials` / `secret` を含むファイル、`.xlsx` / `.xlsm` の読み取り。`curl` / `wget`、force push、`rm -rf /...` |
+| deny | `.env*`、ファイル名に `credentials` / `secret` を含むファイル、`.xlsx` / `.xlsm` の読み取り。force push、`rm -rf /...` |
 | ask | マイグレーションディレクトリの編集 |
 | その他 | `bypassPermissions` モードを無効化。claude.ai コネクタと Artifact を無効化 |
 
 **限界**（公式ドキュメントの記載に基づく）：
 
-- Bash の deny ルールはコマンドの文字列に対する一致であり、別の書き方（`sh -c`、フルパス指定など）は対象外となる。
+- Bash の deny ルールはコマンドの文字列に対する一致であり、別の書き方（`sh -c`、フルパス指定など）は対象外となる。このため `curl` などの通信コマンドは deny にしていない（ローカルサービスの起動確認にも使用する）。外部への通信は 6 章のサンドボックスの許可リストで制限する。
 - Read の deny ルールは組み込みのファイルツールと `cat` などの認識可能なコマンドに適用される。任意のスクリプトや `grep -r` による読み取りは防げない。
 - `credentials` / `secret` はファイル名による推測である。実際の認証情報の配置に合わせて追加が必要となる。
 - `AGENTS.md` の「顧客情報を AI ツールに渡さない」はモデルと利用者への指示であり、技術的な強制力はない。
@@ -71,16 +71,16 @@
 
 | キー | 目的 |
 |---|---|
-| `allowManagedMcpServersOnly`、`allowedMcpServers` | 許可した MCP サーバー以外を読み込ませない |
+| `allowManagedMcpServersOnly`、`allowedMcpServers` | 許可した MCP サーバー以外を読み込ませない。例では Playwright を起動コマンドの完全一致（`serverCommand`）で許可している |
 | `strictKnownMarketplaces`（空の配列） | プラグインのマーケットプレイスを追加させない |
-| `allowManagedModsOnly` | 組織が配布した mod 以外を読み込ませない |
+| `pluginConfigs` の `cc-plugin-sec-default@builtin` に対する `allowManagedModsOnly` オプション | 利用者が導入した mod を読み込ませない（組み込みの mod は対象外） |
 | `permissions.disableBypassPermissionsMode` | 権限確認を省略するモードを使用させない |
 | `sandbox`（`allowUnsandboxedCommands: false`、`network.allowedDomains`） | Bash コマンドのファイル／ネットワークアクセスを OS レベルで制限する |
 | `disableClaudeAiConnectors`、`enableArtifact` | コネクタと Artifact の公開を止める |
 | `env`（`DISABLE_TELEMETRY` など） | 任意のテレメトリを止める |
 | `cleanupPeriodDays` | セッション記録の保持期間を短くする |
 
-例の値（許可ドメイン、保持日数、`allowedMcpServers` の指定方法など）は出発点であり、そのまま配布しない。`allowedMcpServers` を名前で指定する方法は、利用者が任意のサーバーに同じ名前を付けられるため弱い。コマンドまたは URL で指定する構文を公式の設定リファレンスで確認すること。
+例の値（許可ドメイン、保持日数など）は出発点であり、そのまま配布しない。`serverCommand` は引数まで完全一致のため、Playwright MCP のバージョンを上げる際は `.mcp.json` と同時に更新する。サンドボックスの許可リストでローカルサービス（`localhost`）への接続に追加の設定が必要かどうかは、配布前に確認すること。
 
 ## 7. ネットワークの許可が必要な接続先
 
@@ -110,6 +110,7 @@ Claude Code 本体が必要とする接続先は公式の一覧（末尾の参�
 
 - ネイティブ Windows 上での権限ルールの動作。
 - managed settings の例を実際に配布した場合の動作。本リポジトリの CI では JSON としての妥当性のみを確認している。
+- プロジェクトの `settings.json` に追加した無効化の設定（`bypassPermissions`、claude.ai コネクタ、Artifact）が、実際のセッションで期待どおりに動作すること。各キーの説明は公式の設定リファレンスに基づいており、セッションでの動作は確認していない。
 - 多モジュール構成、Spring Security を使用する業務プロジェクトでの動作。
 
 ## 参照先

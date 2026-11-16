@@ -1,8 +1,6 @@
 {
   "permissions": {
     "deny": [
-      "Bash(curl *)",
-      "Bash(wget *)",
       "Read(/**/.env)",
       "Read(/**/.env.*)"
     ],
@@ -11,11 +9,15 @@
   "allowManagedMcpServersOnly": true,
   "allowedMcpServers": [
     {
-      "serverName": "playwright"
+      "serverCommand": [
+        "npx",
+        "-y",
+        "@playwright/mcp@0.0.85",
+        "--isolated"
+      ]
     }
   ],
   "strictKnownMarketplaces": [],
-  "allowManagedModsOnly": true,
   "disableClaudeAiConnectors": true,
   "enableArtifact": false,
   "sandbox": {
@@ -36,5 +38,12 @@
   "cleanupPeriodDays": 7,
   "companyAnnouncements": [
     "顧客情報・本番データ・認証情報を AI ツールに渡さないこと。詳細は社内の AI 利用ガイドラインを参照。"
-  ]
+  ],
+  "pluginConfigs": {
+    "cc-plugin-sec-default@builtin": {
+      "options": {
+        "allowManagedModsOnly": true
+      }
+    }
+  }
 }

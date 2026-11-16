@@ -111,8 +111,9 @@ class TemplateTests(unittest.TestCase):
         self.assertIs(settings['disableClaudeAiConnectors'], True)
         self.assertIs(settings['enableArtifact'], False)
         self.assertEqual(settings['permissions']['disableBypassPermissionsMode'], 'disable')
-        for rule in ('Bash(curl *)', 'Bash(wget *)'):
-            self.assertIn(rule, settings['permissions']['deny'])
+        # curl stays usable: the agent polls the local service before a browser check, and an allow
+        # rule cannot carve an exception out of a deny. Egress is limited by the managed sandbox instead.
+        self.assertFalse([rule for rule in settings['permissions']['deny'] if 'curl' in rule or 'wget' in rule])
         self.assertNotIn('enabledPlugins', settings)
         self.assertNotIn('extraKnownMarketplaces', settings)
         # No file in the repository asks a team to enable third-party plugins or marketplaces.
@@ -124,8 +125,13 @@ class TemplateTests(unittest.TestCase):
             self.assertNotIn('extraKnownMarketplaces', text, path)
         managed = json.loads((ROOT / 'templates/managed-settings.example.json').read_text(encoding='utf-8'))
         self.assertIs(managed['allowManagedMcpServersOnly'], True)
-        self.assertIs(managed['allowManagedModsOnly'], True)
-        self.assertEqual(managed['allowedMcpServers'], [{'serverName': 'playwright'}])
+        guard = managed['pluginConfigs']['cc-plugin-sec-default@builtin']['options']
+        self.assertIs(guard['allowManagedModsOnly'], True)
+        self.assertNotIn('allowManagedModsOnly', managed, 'it is an option of the built-in guard, not a top-level key')
+        # The allowlist names the exact command the template starts, so the two cannot drift apart.
+        playwright = json.loads((PROJECT / '.mcp.json').read_text(encoding='utf-8'))['mcpServers']['playwright']
+        self.assertEqual(managed['allowedMcpServers'], [{'serverCommand': [playwright['command'], *playwright['args']]}])
+        self.assertIs(managed['sandbox']['network']['allowManagedDomainsOnly'], True)
         self.assertEqual(managed['strictKnownMarketplaces'], [])
         self.assertIs(managed['sandbox']['allowUnsandboxedCommands'], False)
         self.assertNotIn('xxxxxxxx', json.dumps(managed))
@@ -208,7 +214,7 @@ class TemplateTests(unittest.TestCase):
     def test_validation_runs_on_pr_and_main_push_only(self):
         data = yaml.load((ROOT / '.github/workflows/validate.yml').read_text(encoding='utf-8'), Loader=yaml.BaseLoader)
         self.assertIn('pull_request', data['on'])
-        self.assertEqual(data['on']['push']['branches'], ['main'])
+        self.assertEqual(data['on']['push']['branches'], ['main', 'company'])
         self.assertEqual(set(data['jobs']['validate']['strategy']['matrix']['os']),
                          {'ubuntu-latest', 'macos-latest', 'windows-latest'})
 

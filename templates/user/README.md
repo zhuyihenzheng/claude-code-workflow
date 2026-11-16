@@ -12,7 +12,7 @@ mod 在 Claude Code 进程内以你的权限运行：能读写你账号可访问
 | Anthropic 示例 mod | [claude-code-playground](https://github.com/anthropics/claude-code-playground/tree/main/claude-code/mods) 的 `blast-radius`、`replay-theater`、`token-weather` | 官方说明为“按现状分享，不提供支持”。不默认安装；确有需要时，先用 `claude plugin validate <目录>` 列出它的 hooks 与调用，过安全审查，并由管理员统一分发 |
 | 其他第三方插件 / mod | 个人或其他厂商的 GitHub 仓库 | 不安装 |
 
-管理员可在 managed settings 中用 `allowManagedModsOnly` 只允许组织分发的 mod、用 `strictKnownMarketplaces` 限定插件市场，示例见 [managed-settings.example.json](../managed-settings.example.json)。个人临时排查可用 `claude --safe-mode` 启动一次不加载任何已安装 mod 的会话。
+管理员可在 managed settings 中给内置守卫 `cc-plugin-sec-default` 设置 `allowManagedModsOnly` 选项来只允许组织分发的 mod、用 `strictKnownMarketplaces` 限定插件市场，示例见 [managed-settings.example.json](../managed-settings.example.json)。个人临时排查可用 `claude --safe-mode` 启动一次不加载任何已安装 mod 的会话。
 
 ## Skills
 
