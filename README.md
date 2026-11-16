@@ -96,6 +96,19 @@ python3 -m unittest discover -s tests -v
 
 本地测试不调用 Claude API；缺少 Playwright 时浏览器测试会跳过，CI 中强制执行。逐轮的问题与修复记录见 [09 · 审查与修复](docs/09-审查与修复.md)，Windows 搭建见 [02 · 基础搭建](docs/02-基础搭建.md#6-windows-两条路径)。
 
+## 用真实会话改进模板
+
+模板改得对不对，要看它在导入方项目里的实际表现。本仓库自带一个维护用的 skill [`workflow-retro`](.claude/skills/workflow-retro/SKILL.md)：在本仓库里对 Claude Code 说“复盘”，它会度量导入方项目的会话记录、定位原因、归因后再改模板。
+
+度量脚本也可以单独运行。它只输出次数，不输出提示词、代码或命令参数（`--excerpt` 除外，那是在本机查看原文片段用的）：
+
+```bash
+python3 .claude/skills/workflow-retro/scripts/session_metrics.py --project /path/to/your-project
+python3 .claude/skills/workflow-retro/scripts/session_metrics.py --project /path/to/your-project --timeline <会话 id 前 8 位>
+```
+
+它回答的问题是“最后一次改代码之后，模板要求的检查有没有跑通”，以及返工轮数、被权限拦下的次数、skill 与评审子代理有没有被用到。这些是代理指标，结论要读对应的会话才能下。
+
 ## 许可证
 
 MIT（模板与文档可自由用于自己的项目）。
