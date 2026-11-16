@@ -35,7 +35,11 @@ import sys
 MAVEN = re.compile(r'(?:^|[\s;&|(])((?:[\w.\\/-]*[\\/])?mvnw(?:\.cmd)?|mvn)\s+([^;&|]*)')
 TEST_GOALS = {'test', 'verify', 'package', 'install', 'integration-test'}
 BROWSER_TOOLS = ('mcp__playwright__', 'mcp__chrome-devtools__', 'mcp__claude-in-chrome__')
-BROWSER_COMMANDS = r'htmx-check\.mjs|\bplaywright\s+test\b'
+# htmx-check, Playwright Test, and the screen-test runner (run.mjs --engine …, or npm test inside screen-tests/).
+# A --build-only run opens no browser, so it is not a check.
+BROWSER_COMMANDS = (r'htmx-check\.mjs|\bplaywright\s+test\b'
+                    r'|\brun\.mjs\b(?![^\n;&|]*--build-only)[^\n;&|]*--engine\b'
+                    r'|screen-tests\b[^\n]*\bnpm\s+(?:run\s+)?test\b')
 SKIP_TESTS = ('-DskipTests', '-Dmaven.test.skip')
 EDIT_TOOLS = {'Edit', 'Write', 'MultiEdit', 'NotebookEdit'}
 SYSTEM_TEXT = ('<', '[Request interrupted', 'Caveat:')

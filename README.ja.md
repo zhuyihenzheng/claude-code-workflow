@@ -26,6 +26,7 @@
 python3 scripts/install.py project /path/to/your-project          # 予行：計画を表示するだけで、書き込まない
 python3 scripts/install.py project /path/to/your-project --diff   # 予行：既存ファイルとの差分も表示する
 python3 scripts/install.py project /path/to/your-project --apply  # 書き込む
+python3 scripts/install.py project /path/to/your-project --apply --with-screen-tests   # 画面試験（midscene-poc）も導入する
 python3 scripts/install.py doctor /path/to/your-project           # 導入後の確認：TODO の残り、ルールの同期、設定上のリスク
 ```
 
@@ -49,6 +50,7 @@ CLAUDE.md                         @AGENTS.md と Claude Code 固有の補足
 .claude/rules/{jsp,htmx}.md       対象パスを扱うときだけ読み込まれる画面ルール
 .claude/agents/code-reviewer.md   読み取り専用のレビュー用サブエージェント
 .claude/skills/spring-endpoint/   エンドポイント／画面フラグメント追加の標準手順
+.claude/skills/change-flow/       改修の標準手順（設計書 → 実装 → 単体テスト → 画面試験 → 試験書）
 .claude/hooks/verify-stop.py      Stop hook の参考サンプル（未登録、POSIX 向け）
 .claude/README.md                 設定ガイド（人向け、セッションには読み込まれない）
 .github/copilot-instructions.md   Copilot 向けの要約
@@ -57,6 +59,8 @@ CLAUDE.md                         @AGENTS.md と Claude Code 固有の補足
 scripts/sync_rules.py             rules から Copilot の指示を生成し、--check で差分を検出する
 scripts/htmx-check.mjs            実ブラウザーで HTMX のフラグメント置換を検証する（ログイン状態、セッション失効に対応）
 scripts/xlsx2ai.py                Excel 設計書をシート単位の JSON／Mermaid に変換する
+scripts/xlsx_patch.py             変更指示どおりに Excel を書き換える（指示したセル以外は変更しない）
+screen-tests/                     （任意）画面試験。バージョンを固定した midscene-poc を使用する
 ```
 
 ## 検証範囲
