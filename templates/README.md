@@ -15,7 +15,7 @@
 
 ## 安装与适配
 
-1. 用[安装脚本](../scripts/install.py)把 `project/` 合并到目标项目（Python 3.9+，跨平台）。它同时把 [scripts/sync_rules.py](../scripts/sync_rules.py) 复制到目标项目的 `scripts/`。
+1. 用[安装脚本](../scripts/install.py)把 `project/` 合并到目标项目（Python 3.9+，跨平台）。三个脚本（`sync_rules.py`、`htmx-check.mjs`、`xlsx2ai.py`）随模板装进目标项目的 `scripts/`。
 
    ```bash
    python3 scripts/install.py project /path/to/your-project                   # 预演，只打印计划
@@ -54,7 +54,19 @@ node scripts/htmx-check.mjs --url http://localhost:8080/orders/new \
   --contains "登録しました" --absent "ログイン" --screenshot target/htmx-check/success.png
 ```
 
-每次运行验证一次交互；成功提交、校验失败回填、会话失效分别运行。需要登录的页面请在脚本基础上加入团队的测试账号登录步骤（只用合成数据账号）。本仓库测试分两组：模拟 htmx 事件的本地页面验证判定逻辑；CI 的 Ubuntu 浏览器 job 还用 npm 安装的真实 `htmx.org@2.0.4` 与模拟服务端，验证成功替换、`hx-target` 不存在（`htmx:targetError`）、默认不替换 422、[04 专项](../docs/04-java-spring-htmx-jsp.md#4-htmx-校验失败必须验证响应替换) 中的 422 `responseHandling` 配置能替换错误片段，以及登录页塞进片段会被判 NG。该 job 设置 `HTMX_CHECK_REQUIRED=1`，缺少依赖即失败而非跳过。Chromium 把 4xx/5xx 响应记成 console 错误，脚本忽略这类状态日志，由 `htmx:responseError` 判断 htmx 是否视为错误。这些测试不代替目标项目页面的验收。
+每次运行验证一次交互；成功提交、校验失败回填、会话失效分别运行。
+
+需要登录的页面先用合成数据的测试账号保存一次登录态，再用 `--storage-state` 传入；加 `--clear-cookies` 会在页面打开后、点击前清掉 cookie，用来验证会话失效时登录页没有被塞进片段：
+
+```bash
+npx playwright codegen --save-storage=target/htmx-check/state.json http://localhost:8080/login
+node scripts/htmx-check.mjs --storage-state target/htmx-check/state.json --url ... --click "#submit" --expect "#order-form" --contains "登録しました"
+node scripts/htmx-check.mjs --storage-state target/htmx-check/state.json --clear-cookies --url ... --click "#submit" --expect "#order-form" --absent "ログイン"
+```
+
+登录态文件含 cookie，不要提交。第三条命令的含义取决于项目的会话失效契约：若约定返回 401 并由前端跳转，片段不会被替换，应改为断言项目约定的结果。
+
+本仓库测试分两组：模拟 htmx 事件的本地页面验证判定逻辑；CI 的 Ubuntu 浏览器 job 还用 npm 安装的真实 `htmx.org@2.0.11` 与模拟服务端，验证成功替换、`hx-target` 不存在（`htmx:targetError`）、默认不替换 422、[04 专项](../docs/04-java-spring-htmx-jsp.md#4-htmx-校验失败必须验证响应替换) 中的 422 `responseHandling` 配置能替换错误片段，以及登录页塞进片段会被判 NG。该 job 设置 `HTMX_CHECK_REQUIRED=1`，缺少依赖即失败而非跳过。Chromium 把 4xx/5xx 响应记成 console 错误，脚本忽略这类状态日志，由 `htmx:responseError` 判断 htmx 是否视为错误。这些测试不代替目标项目页面的验收。
 
 ## Excel 设计书转换脚本
 
@@ -64,18 +76,12 @@ node scripts/htmx-check.mjs --url http://localhost:8080/orders/new \
 
 AGENTS.md 是项目规则的唯一事实来源；`.github/copilot-instructions.md` 只保留必守摘要，修改共通规则时同时核对摘要。路径细则只改 `.claude/rules/*.md`，由脚本转换 `paths:` 列表为 Copilot 的 `applyTo`，正文原样生成；不要直接编辑 `.github/instructions/` 镜像。
 
-在本模板仓库根运行（省略参数时默认使用脚本所在仓库的 `templates/project`）：
+[`project/scripts/sync_rules.py`](project/scripts/sync_rules.py) 省略参数时处理它自己所在的项目（`scripts/` 的上一级），所以同一条命令在目标项目和本仓库都成立；也可以显式传入其他项目根路径。
 
 ```bash
-python3 scripts/sync_rules.py
+python3 scripts/sync_rules.py              # 目标项目根
 python3 scripts/sync_rules.py --check
-```
-
-复制到目标项目后，在目标项目根运行，显式传入 `.`（也可传入其他项目根路径）：
-
-```bash
-python3 scripts/sync_rules.py .
-python3 scripts/sync_rules.py . --check
+python3 templates/project/scripts/sync_rules.py --check   # 本模板仓库根
 ```
 
 原生 Windows 将 `python3` 换为 `py` 或 `python`，参数相同。每次编辑路径规则后先生成、再 check；目标项目 CI 也应执行 `--check`，不同步时退出 1，不写文件。脚本支持现有的 `paths:` 块列表（双引号、单引号或简单无引号 glob），不解析任意 YAML；无效输入退出 2。输出 UTF-8 / LF；删除源规则后只清理带脚本标记的镜像，其他自有指令保留。
@@ -89,7 +95,7 @@ Copilot 的 IDE、agent 与 code review 是否同时读取 AGENTS.md、支持哪
 ```json
 {
   "command": "cmd",
-  "args": ["/c", "npx", "-y", "@playwright/mcp@0.0.83", "--isolated"]
+  "args": ["/c", "npx", "-y", "@playwright/mcp@0.0.85", "--isolated"]
 }
 ```
 
@@ -141,8 +147,9 @@ printf '%s\n' '{"stop_hook_active":false}' | python3 .claude/hooks/verify-stop.p
 - Windows 的 Bash allow 同时列出 `mvnw.cmd` 与 `./mvnw.cmd` 的精确命令；[官方权限文档](https://code.claude.com/docs/en/permissions#powershell)已支持 `PowerShell(...)` 语法，因此也提供 `.\mvnw.cmd` 的同等规则。旧版 CLI 是否提供 PowerShell 工具以安装版本为准，用 `/permissions` 核对；Bash 规则不会自动匹配 PowerShell 命令。
 - `/**/.env` 和 `/**/.env.*` 覆盖根目录与子目录，不再重复列出 `/.env*`。项目 `.claude/settings.json` 的 `/` 锚定主工作目录，不是 `.claude` 目录；请从项目根/worktree 根启动。通过 `--settings` 传入的文件有不同锚定语义，见[官方权限说明](https://code.claude.com/docs/en/permissions)。`credentials` / `secret` 文件名规则是示例，可能误伤业务类名，须按实际凭据路径调整。
 - 官方文档说明 Windows 路径先规范化为 POSIX 形式再匹配，因此这些规则继续使用正斜杠 `/`；真实 Windows 上的 deny 匹配仍待验收，不能把模板字符串断言当成权限引擎测试。
+- force push 的 deny 覆盖 `--force` 与 `-f` 出现在参数前后的写法，不拦 `--force-with-lease`（未列入 allow，仍会询问）。Bash 规则只匹配命令文本，换一种调用形式即可绕开，真正的保护是远端的分支保护规则。
 - 迁移目录使用 `ask`，允许确认后新增迁移；原来的整个目录 `deny` 会把新增一起拦住。已合并迁移的不可变性由 Flyway/Liquibase 校验、CI 与人审保证。
-- 路径规则不覆盖所有任意脚本/MCP/hook 的访问；两条危险 Bash deny 也不是完整命令防火墙。需 OS 沙箱、最小凭据和项目外密钥管理配合，见 [权限说明](../docs/02-基础搭建.md)。
+- 路径规则不覆盖所有任意脚本/MCP/hook 的访问；`rm -rf` 与 force push 的 Bash deny 也不是完整命令防火墙。需 OS 沙箱、最小凭据和项目外密钥管理配合，见 [权限说明](../docs/02-基础搭建.md)。
 - Hook 本身以当前用户身份运行，不能把 settings 中的工具权限当作 hook 的执行限制。
 
 ## GitHub workflows
@@ -166,5 +173,7 @@ python3 -m unittest discover -s tests -v
 ```
 
 测试覆盖模拟 Maven 的成功/编译错误/环境错误/重试/超时/信号中断及子进程清理、环境变量/符号链接/空格/子目录路径，以及 JSON、workflow 关键配置、agent/skill/rule frontmatter、CLAUDE.md 行数预算、文档相对链接、AGENTS.md 分层/导入与 Copilot 规则同步，和安装脚本的预演/复制/JSON 与行合并/冲突保留/CRLF 保留/文件符号链接不写穿/写入失败报告/workflow 按需安装。它们不调用 Claude API，不消耗模型额度。CI 的 `sample-app` job 另在真实 Spring Boot + JSP + HTMX 示例应用上执行安装、`./mvnw verify`、Stop hook 与页面检查（见[审查记录](../docs/09-审查与修复.md#第四轮真实-spring-boot--jsp--htmx-端到端验证)），但示例应用不代替你的业务项目验收。
+
+CI 另有三项检查：`ruff check`（三平台）、actionlint（本仓库 workflow 与两个 workflow 模板）、对固定版本的 Playwright MCP 与 DBHub 做 MCP 握手并列出工具（`tests/test_mcp_servers.py`，需访问 npm registry，本地默认跳过，设 `MCP_SERVERS_REQUIRED=1` 运行）。
 
 CI 矩阵包含 Linux / macOS / Windows。`tests/test_hooks.py` 仅测试 POSIX 参考脚本，在原生 Windows 整个模块跳过；模板测试在三平台运行。Windows 本地用 `py -m pip install -r requirements-dev.txt` 和 `py -m unittest discover -s tests -v`（或对应的 `python`）。尚未在真实 Windows 验收 Claude Code、Maven 或 MCP。

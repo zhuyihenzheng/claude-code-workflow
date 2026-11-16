@@ -26,17 +26,40 @@ jobs:
           cache: pip
           cache-dependency-path: requirements-dev.txt
       - run: python -m pip install -r requirements-dev.txt
+      - run: ruff check .
       - run: python -m unittest discover -s tests -v
+      - name: Generated Copilot instructions are in sync
+        run: python templates/project/scripts/sync_rules.py --check
       - name: Installer dry run smoke test
         shell: bash
         run: |
           mkdir -p "$RUNNER_TEMP/demo" && touch "$RUNNER_TEMP/demo/pom.xml" "$RUNNER_TEMP/demo/mvnw"
           python scripts/install.py project "$RUNNER_TEMP/demo"
+  actionlint:
+    # This workflow plus the workflow templates that get installed into other repositories.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install actionlint
+        env:
+          VERSION: 1.7.12
+          SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+        run: |
+          curl -fsSL -o actionlint.tar.gz "https://github.com/rhysd/actionlint/releases/download/v${VERSION}/actionlint_${VERSION}_linux_amd64.tar.gz"
+          echo "${SHA256}  actionlint.tar.gz" | sha256sum -c -
+          tar -xzf actionlint.tar.gz actionlint
+      - run: >-
+          ./actionlint -color
+          .github/workflows/validate.yml
+          templates/project/.github/workflows/claude.yml
+          templates/project/.github/workflows/claude-review.yml.example
   browser:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
       HTMX_CHECK_REQUIRED: '1'
+      MCP_SERVERS_REQUIRED: '1'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -45,9 +68,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: npm install --no-save --no-package-lock playwright@1.63.0 htmx.org@2.0.4
+      - run: npm install --no-save --no-package-lock playwright@1.65.1 htmx.org@2.0.11
       - run: npx playwright install --with-deps chromium
-      - run: python -m unittest tests.test_htmx_check -v
+      - run: python -m unittest tests.test_htmx_check tests.test_mcp_servers -v
   sample-app:
     # Real Spring Boot + JSP + HTMX app: installer, mvnw verify, Stop hook against
     # real javac output, and htmx-check.mjs against the running server.
@@ -66,7 +89,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: npm install --no-save --no-package-lock playwright@1.63.0 htmx.org@2.0.4
+      - run: npm install --no-save --no-package-lock playwright@1.65.1 htmx.org@2.0.11
       - run: npx playwright install --with-deps chromium
       - run: bash tests/e2e_sample_app.sh
       - if: always()

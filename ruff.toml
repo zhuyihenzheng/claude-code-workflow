@@ -1,0 +1,9 @@
+# Lint only (pyflakes, pycodestyle, bugbear); no auto-formatting, so the template
+# scripts that get installed into other projects keep their style. Line length is
+# not enforced: user-facing messages are long single-line strings.
+target-version = "py39"
+extend-exclude = ["node_modules", "e2e-output"]
+
+[lint]
+select = ["E", "F", "W", "B"]
+ignore = ["E501"]

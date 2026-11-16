@@ -3,7 +3,7 @@
     "dbhub": {
       "args": [
         "-y",
-        "@bytebase/dbhub@1.5.0",
+        "@bytebase/dbhub@1.6.1",
         "--dsn",
         "${DATABASE_URL}"
       ],

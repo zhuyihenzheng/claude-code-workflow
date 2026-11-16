@@ -47,8 +47,6 @@ class InstallTests(unittest.TestCase):
         for rel, source in install.template_files(PROJECT):
             with self.subTest(rel=rel):
                 self.assertEqual((self.target / rel).read_bytes(), source.read_bytes())
-        self.assertEqual((self.target / 'scripts/sync_rules.py').read_bytes(),
-                         (ROOT / 'scripts/sync_rules.py').read_bytes())
         self.assertNotIn('hooks', json.loads((self.target / '.claude/settings.json').read_text(encoding='utf-8')))
         self.assertEqual(set(self.kinds().values()), {'skip'})
 
@@ -70,7 +68,7 @@ class InstallTests(unittest.TestCase):
 
     def test_installed_sync_rules_reports_target_in_sync(self):
         run('project', self.target, '--apply')
-        result = subprocess.run([sys.executable, 'scripts/sync_rules.py', '.', '--check'],
+        result = subprocess.run([sys.executable, 'scripts/sync_rules.py', '--check'],
                                 cwd=self.target, capture_output=True, text=True, encoding='utf-8')
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 

@@ -2,6 +2,8 @@
 
 [![Validate templates](https://github.com/zhuyihenzheng/claude-code-workflow/actions/workflows/validate.yml/badge.svg)](https://github.com/zhuyihenzheng/claude-code-workflow/actions/workflows/validate.yml)
 
+[日本語](README.ja.md)
+
 面向 **Java + Spring Boot 后端 / JSP、HTMX 或两者并用** 项目的 Claude Code 团队工作流，与 GitHub Copilot 共用一份 AGENTS.md。仓库包含三部分：
 
 - **手册**（[docs/](docs/)，中文）：规划、搭建、标准回路、工具选型、避坑；
@@ -72,7 +74,7 @@ CLAUDE.md                         @AGENTS.md + Claude Code 专属补充
 .github/instructions/             由 rules 生成的 Copilot 路径指令
 .mcp.json                         Context7 + 隔离的 Playwright
 scripts/sync_rules.py             rules → Copilot 指令的同步与 --check
-scripts/htmx-check.mjs            真实浏览器验证 HTMX 片段替换
+scripts/htmx-check.mjs            真实浏览器验证 HTMX 片段替换（含登录态、会话失效）
 scripts/xlsx2ai.py                Excel 设计书 → 按 sheet 拆分的 JSON / Mermaid
 .gitignore / .gitattributes       补充缺失规则
 ```
@@ -89,6 +91,7 @@ python3 -m unittest discover -s tests -v
 | 模板内容、安装脚本、规则同步、Excel 转换：Linux / macOS / Windows | 真实业务项目（多模块、Spring Security/CSRF、外部 Tomcat/WAR） |
 | `htmx-check.mjs`：真实 htmx 与 Chromium（Ubuntu） | 原生 Windows 上的 Claude Code、Maven 与 MCP |
 | 安装 → `./mvnw verify` → 页面检查：真实 Spring Boot + JSP + HTMX 示例应用（Ubuntu） | Claude Code 会话实际加载情况、GitHub App 与付费 Action |
+| 固定版本的 Playwright MCP 与 DBHub：MCP 握手并列出工具（Ubuntu）；workflow 文件：actionlint | 两个 MCP server 的实际浏览器操作与真实数据库 |
 | Stop hook 参考样例：模拟与真实 Maven（仅 POSIX） | Copilot 各入口是否读取 AGENTS.md 与路径指令 |
 
 本地测试不调用 Claude API；缺少 Playwright 时浏览器测试会跳过，CI 中强制执行。逐轮的问题与修复记录见 [09 · 审查与修复](docs/09-审查与修复.md)，Windows 搭建见 [02 · 基础搭建](docs/02-基础搭建.md#6-windows-两条路径)。

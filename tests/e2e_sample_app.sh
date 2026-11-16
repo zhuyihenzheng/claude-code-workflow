@@ -32,7 +32,7 @@ python "$REPO/scripts/install.py" project "$WORK"
 python "$REPO/scripts/install.py" project "$WORK" --apply
 python "$REPO/scripts/install.py" project "$WORK" | tee "$OUT/install-second-run.txt"
 grep -q 'create: 0, merge: 0' "$OUT/install-second-run.txt"
-python scripts/sync_rules.py . --check
+python scripts/sync_rules.py --check
 
 step "./mvnw verify (JUnit + MockMvc)"
 ./mvnw -B -q verify

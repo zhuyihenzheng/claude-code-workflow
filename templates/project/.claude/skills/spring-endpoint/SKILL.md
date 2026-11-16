@@ -33,5 +33,5 @@ description: Spring Boot のエンドポイント（画面フラグメントを�
 - `./mvnw -Dtest=<TestClass> test` が成功したことを確認し、出力を提示する。
 - `./mvnw -q compile` が成功することを確認する。
 - 画面を含む場合：サービス起動後、ブラウザーで画面を開いて実際に操作し、フラグメントの置換成功をアサーションで確認してスクリーンショットを保存する。
-  `node scripts/htmx-check.mjs --url <URL> --click <操作> --expect <置換先> --contains <期待文言> --screenshot <保存先>` を正常送信・入力チェックエラー・セッション失効ごとに実行できる（終了コード 0 = 合格、1 = NG、2 = 検証未完了）。
+  `node scripts/htmx-check.mjs --url <URL> --click <操作> --expect <置換先> --contains <期待文言> --screenshot <保存先>` を正常送信・入力チェックエラー・セッション失効ごとに実行できる（終了コード 0 = 合格、1 = NG、2 = 検証未完了）。ログインが必要な画面は `--storage-state <保存したログイン状態>` を渡し、セッション失効時は `--clear-cookies --absent <ログイン画面の文言>` を追加する。
 - 最後に code-reviewer サブエージェントで diff をレビューしてから、結果を報告する。

@@ -1,5 +1,6 @@
 import functools
 import http.server
+import json
 import os
 from pathlib import Path
 import shutil
@@ -48,9 +49,31 @@ PAGES = {
 }
 
 
+# A page behind a session cookie: without it the server answers with the login page,
+# for the full page and for the fragment alike (what a security filter typically does).
+SESSION_PAGE = PAGE.format(htmx=HTMX, action=(
+    "fetch('/session-fragment').then(r => r.text()).then(t => { document.getElementById('target').innerHTML = t; });"))
+LOGIN_PAGE = '<!doctype html><meta charset="utf-8"><title>login</title><form id="login">ログイン</form>'
+STORAGE_STATE = {'cookies': [{'name': 'sid', 'value': 'ok', 'domain': '127.0.0.1', 'path': '/', 'expires': -1,
+                              'httpOnly': True, 'secure': False, 'sameSite': 'Lax'}], 'origins': []}
+
+
 class QuietHandler(http.server.SimpleHTTPRequestHandler):
     def log_message(self, *args):
         pass
+
+    def do_GET(self):
+        path = self.path.split('?')[0]
+        if path not in ('/session.html', '/session-fragment'):
+            return super().do_GET()
+        signed_in = 'sid=ok' in self.headers.get('Cookie', '')
+        body = LOGIN_PAGE if not signed_in else SESSION_PAGE if path == '/session.html' else '保存しました'
+        data = body.encode('utf-8')
+        self.send_response(200)
+        self.send_header('Content-Type', 'text/html; charset=utf-8')
+        self.send_header('Content-Length', str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
 
     def do_POST(self):
         self.send_response(422)
@@ -86,6 +109,36 @@ class HtmxCheckTests(unittest.TestCase):
         args = [NODE, str(SCRIPT), '--url', self.base + page, '--click', '#go', '--expect', '#target',
                 '--timeout', '2000', *extra]
         return subprocess.run(args, capture_output=True, text=True, encoding='utf-8', timeout=60)
+
+    def storage_state(self):
+        path = self.root / 'state.json'
+        path.write_text(json.dumps(STORAGE_STATE), encoding='utf-8')
+        return str(path)
+
+    def test_storage_state_signs_in(self):
+        result = self.check('session.html')
+        self.assertEqual(result.returncode, 1, 'without the session the login page is shown')
+        result = self.check('session.html', '--storage-state', self.storage_state(),
+                            '--contains', '保存しました', '--absent', 'ログイン')
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_clear_cookies_exposes_login_page_swapped_into_fragment(self):
+        # The page loads signed in; the request after the click carries no session.
+        expired = ('session.html', '--storage-state', self.storage_state(), '--clear-cookies')
+        result = self.check(*expired, '--absent', 'ログイン')
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('表示されてはいけない「ログイン」', result.stderr)
+        self.assertEqual(self.check(*expired, '--contains', 'ログイン').returncode, 0)
+
+    def test_missing_or_invalid_storage_state_is_incomplete(self):
+        result = self.check('ok.html', '--storage-state', str(self.root / 'missing.json'))
+        self.assertEqual(result.returncode, 2)
+        self.assertIn('検証未完了', result.stderr)
+        broken = self.root / 'broken.json'
+        broken.write_text('{ not json', encoding='utf-8')
+        result = self.check('ok.html', '--storage-state', str(broken))
+        self.assertEqual(result.returncode, 2)
+        self.assertIn('検証未完了', result.stderr)
 
     def test_successful_swap_passes_and_saves_screenshot(self):
         shot = self.root / 'shots/ok.png'
