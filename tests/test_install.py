@@ -56,7 +56,7 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertFalse(workflows.exists())
         self.assertRegex(out, r'optional\s+\.github/workflows/claude\.yml\s+\(.*--with-workflows')
-        self.assertIn('optional: 2', out)
+        self.assertIn('optional: 3', out)
         self.assertEqual({k for rel, k in self.kinds().items() if rel.startswith('.github/workflows/')}, {'optional'})
         self.assertEqual(set(self.kinds().values()), {'skip', 'optional'})
         run('project', self.target, '--apply', '--with-workflows')
@@ -258,6 +258,61 @@ class InstallTests(unittest.TestCase):
         self.assertIn('no Maven Wrapper', err)
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
             install.main(['project', str(ROOT)])
+
+    def doctor(self):
+        return {message: level for level, message in install.doctor(self.target)}
+
+    def test_doctor_fails_on_a_fresh_install_until_placeholders_are_filled(self):
+        run('project', self.target, '--apply')
+        code, out, _ = run('doctor', self.target)
+        self.assertEqual(code, 1)
+        self.assertRegex(out, r'fail\s+AGENTS\.md: \d+ TODO placeholder')
+        self.assertRegex(out, r'warn\s+\.claude/skills/spring-endpoint/SKILL\.md')
+        self.assertRegex(out, r'ok\s+CLAUDE\.md imports @AGENTS\.md')
+        self.assertRegex(out, r'ok\s+\.github/instructions/ matches')
+        for path in (self.target / 'AGENTS.md', self.target / '.claude/skills/spring-endpoint/SKILL.md'):
+            path.write_text(path.read_text(encoding='utf-8').replace('<!-- TODO', '<!-- done'), encoding='utf-8')
+        code, out, _ = run('doctor', self.target)
+        self.assertEqual(code, 0, out)
+        self.assertIn('fail: 0', out)
+        self.assertNotIn('warn ', out)
+
+    def test_doctor_reports_drift_and_risky_configuration(self):
+        run('project', self.target, '--apply')
+        (self.target / 'CLAUDE.md').write_text('# mine\n', encoding='utf-8')
+        rule = self.target / '.claude/rules/jsp.md'
+        rule.write_text(rule.read_text(encoding='utf-8') + '\n- 追加ルール\n', encoding='utf-8')
+        (self.target / '.claude/settings.json').write_text(json.dumps(
+            {'permissions': {'allow': ['Bash(./mvnw *)']}, 'hooks': {'Stop': [{'hooks': []}]}}), encoding='utf-8')
+        (self.target / '.mcp.json').write_text(json.dumps({'mcpServers': {
+            'docs': {'type': 'http', 'url': 'https://example.invalid/mcp'},
+            'loose': {'command': 'npx', 'args': ['-y', 'some-mcp@latest']},
+            'pinned': {'command': 'npx', 'args': ['-y', '@scope/some-mcp@1.2.3']}}}), encoding='utf-8')
+        found = self.doctor()
+        levels = {level: [m for m, lv in found.items() if lv == level] for level in ('warn', 'fail')}
+        self.assertTrue(any('without @AGENTS.md' in m for m in levels['fail']))
+        self.assertTrue(any('out of sync' in m for m in levels['fail']))
+        self.assertTrue(any('broad Maven allow' in m for m in levels['warn']))
+        self.assertTrue(any('no Read deny rule for .env' in m for m in levels['warn']))
+        self.assertTrue(any('hooks are registered' in m for m in levels['warn']))
+        self.assertTrue(any("'docs' is a remote service" in m for m in levels['warn']))
+        self.assertTrue(any("'loose' is started with npx without a pinned version" in m for m in levels['warn']))
+        self.assertFalse(any("'pinned'" in m for m in found))
+
+    def test_doctor_flags_tracked_local_files_and_writes_nothing(self):
+        git = shutil.which('git')
+        if not git:
+            self.skipTest('git not available')
+        run('project', self.target, '--apply')
+        (self.target / '.env').write_text('SECRET=x\n', encoding='utf-8')
+        (self.target / '.env.example').write_text('SECRET=\n', encoding='utf-8')
+        subprocess.run([git, 'init', '-q', str(self.target)], check=True, capture_output=True)
+        subprocess.run([git, '-C', str(self.target), 'add', '-f', '.env', '.env.example'], check=True, capture_output=True)
+        before = {p: p.read_bytes() for p in self.target.rglob('*') if p.is_file() and '.git' not in p.parts}
+        found = self.doctor()
+        self.assertEqual(found["tracked by git but must stay local: ['.env']"], 'fail')
+        self.assertEqual(before, {p: p.read_bytes() for p in self.target.rglob('*') if p.is_file() and '.git' not in p.parts})
+        self.assertEqual(install.doctor(self.target / 'scripts')[0][0], 'fail', 'a directory without AGENTS.md')
 
     def test_user_skills_install_into_claude_dir(self):
         claude = self.target / 'home/.claude'

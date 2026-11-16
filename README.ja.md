@@ -28,6 +28,7 @@
 python3 scripts/install.py project /path/to/your-project          # 予行：計画を表示するだけで、書き込まない
 python3 scripts/install.py project /path/to/your-project --diff   # 予行：既存ファイルとの差分も表示する
 python3 scripts/install.py project /path/to/your-project --apply  # 書き込む
+python3 scripts/install.py doctor /path/to/your-project           # 導入後の確認：TODO の残り、ルールの同期、設定上のリスク
 ```
 
 既存ファイルは上書きも削除もしません。

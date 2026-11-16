@@ -36,6 +36,7 @@
    | `error` | 写入失败（例如路径上有同名文件） | 其余文件照常写入，退出码 1 |
 
    已有的 `Bash(./mvnw *)` 等宽泛规则或与模板 deny/ask 冲突的 allow 会在输出中提示。脚本不删除任何文件，合并后仍须 `git diff` 审查再提交。不用脚本时按相同规则逐项手动合并，不要整目录覆盖。
+   导入并填写完成后运行 `python3 scripts/install.py doctor /path/to/your-project`：只读检查 AGENTS.md 是否还有 TODO、CLAUDE.md 是否导入 AGENTS.md、权限规则与 MCP 配置有无风险、Copilot 镜像是否同步、`.env` 是否误入库；有 `fail` 时退出码为 1。
 2. AGENTS.md 的“チーム共通ルール”跨系统原样复制；只在“本システム固有情報”填写 JSP / HTMX / 两者并用、版本、样例路径、启动方式与测试类。MyBatis 项目保留 Mapper，不引入 JPA；外部 Tomcat/WAR 使用自己的部署命令。CLAUDE.md 保持 `@AGENTS.md` 导入，只放 agent 需要的 Claude Code 补充；给人看的配置说明在 [`.claude/README.md`](project/.claude/README.md)（日文，不会加载进会话）。
 3. 手动运行目标项目的 `./mvnw -q compile`、相关测试和 `./mvnw verify`；Windows CMD 用 `mvnw.cmd`，Git Bash 用 `./mvnw.cmd`，PowerShell 用 `.\mvnw.cmd`，参数相同。先解决环境问题，再考虑可选 hook。
 4. 按需合并 `.mcp.json`。默认只有隔离的 Playwright（本地进程）；不做页面验证的项目直接移除。
@@ -157,9 +158,10 @@ printf '%s\n' '{"stop_hook_active":false}' | python3 .claude/hooks/verify-stop.p
 | 文件 | 使用方式 |
 |---|---|
 | `project/.github/workflows/claude.yml` | `@claude` 评论/评审/新 issue 触发，可修改代码；默认 20 轮、5 美元、20 分钟。**提交后即生效**，未配置 App 与密钥时每次 `@claude` 都会触发一次失败的 job |
+| `project/.github/workflows/ci.yml.example` | 导入方自己的构建门禁：`sync_rules.py --check` 与 `./mvnw -B verify`。不调用任何 AI 服务，改名为 `ci.yml` 并设为 required check 后才构成合并门禁 |
 | `project/.github/workflows/claude-review.yml.example` | 明确需要自动评审时才改名为 `.yml`；带独立 prompt，只评审同仓库非草稿 PR，结果在 Actions 日志；15 轮、3 美元、20 分钟 |
 
-安装脚本默认把两者列为 `optional` 而不复制；确认要用 GitHub 自动化后用 `--with-workflows` 安装。两者保留 action 默认的触发者写权限检查与 bot 限制。预算数字是模板起点，按团队调整。美元限制不能替代账号/组织支出控制。
+安装脚本默认把三者列为 `optional` 而不复制；确认要用 GitHub 自动化后用 `--with-workflows` 安装。两个 Claude workflow 保留 action 默认的触发者写权限检查与 bot 限制。预算数字是模板起点，按团队调整。美元限制不能替代账号/组织支出控制。
 
 交互模板的 `id-token: write` 用于默认 GitHub App 认证；`additional_permissions: actions: read` 与 job 的同名权限一并配置，App 安装也须允许。自动评审模板显式传入只读 `${{ github.token }}` 作为 `github_token` 和 `GH_TOKEN`，不使用 App/OIDC；先通过 `gh pr view/diff` 检查读取权限，失败就终止，不调用模型。API key 使用 `anthropic_api_key`；订阅 OAuth 改成 `claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}`。不能只换 Secret 名而保留错误的 input。
 

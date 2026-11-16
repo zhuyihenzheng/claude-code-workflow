@@ -37,6 +37,7 @@
 | [09 · 审查与修复](docs/09-审查与修复.md) | 按轮次记录的问题、修复、验证结果与剩余限制（历史记录，只追加） |
 | [10 · PR 指摘对应](docs/10-PR指摘对应.md) | PR #1 的 10 条 review 逐条对应，作为“修复后交给 Claude 复审”的实例 |
 | [11 · Excel 设计书](docs/11-Excel设计书.md) | 省 token 的读取方案：工具实测比较、`xlsx2ai.py` 增量转换（sheet JSON + Mermaid 流程图）、MCP 的定位 |
+| [13 · 控制矩阵](docs/13-控制矩阵.md) | 每条要求写在哪、谁拦、谁证明、还缺什么；导入后的 `doctor` 检查 |
 | [templates/](templates/README.md) | 模板的前置条件、安装规则、权限语义、可选 hook 与 workflow 的说明 |
 | [12 · 公司环境](docs/12-公司环境.md) | 公司版与公开版的差异、导入步骤、给管理员的 managed settings 示例；[セキュリティレビュー資料（日本語）](docs/security-review.ja.md) |
 | [templates/user/](templates/user/README.md) | 个人级（`~/.claude`）：mod 的使用口径、3 个中文触发的通用 skill |
@@ -57,6 +58,7 @@
 python3 scripts/install.py project /path/to/your-project          # 预演：只打印计划，不写文件
 python3 scripts/install.py project /path/to/your-project --diff   # 预演，并打印与已有文件的差异
 python3 scripts/install.py project /path/to/your-project --apply  # 写入
+python3 scripts/install.py doctor /path/to/your-project           # 导入后检查：TODO 是否填完、规则是否同步、配置有无风险
 python3 scripts/install.py user --apply                           # 个人级 skills → ~/.claude/skills
 ```
 
