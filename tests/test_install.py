@@ -275,7 +275,13 @@ class InstallTests(unittest.TestCase):
         code, out, _ = run('doctor', self.target)
         self.assertEqual(code, 0, out)
         self.assertIn('fail: 0', out)
-        self.assertNotIn('warn ', out)
+        # The only warnings left are the remote MCP services the template enables by default, if any.
+        remote = {name for name, server in json.loads((PROJECT / '.mcp.json').read_text(encoding='utf-8'))['mcpServers'].items()
+                  if server.get('url')}
+        warnings = [line for line in out.splitlines() if line.startswith('warn ')]
+        self.assertEqual(len(warnings), len(remote), warnings)
+        for name in remote:
+            self.assertTrue(any(f"'{name}' is a remote service" in line for line in warnings), warnings)
 
     def test_doctor_reports_drift_and_risky_configuration(self):
         run('project', self.target, '--apply')

@@ -75,6 +75,18 @@ python3 -m pip install -r requirements-dev.txt     # Python 3.11+
 python3 -m unittest discover -s tests -v
 ```
 
+## 実際のセッションからテンプレートを改善する
+
+テンプレートの良し悪しは、導入先のプロジェクトでの実際の動きで判断します。このリポジトリには保守用の skill [`workflow-retro`](.claude/skills/workflow-retro/SKILL.md) があり、導入先の Claude Code のセッション記録を集計し、原因を特定・分類したうえでテンプレートを修正します。
+
+集計スクリプトは単独でも実行できます。出力は件数のみで、プロンプト、コード、コマンドの引数は含みません（`--excerpt` はローカルで原文の一部を確認するためのもので、例外です）。
+
+```bash
+python3 .claude/skills/workflow-retro/scripts/session_metrics.py --project /path/to/your-project
+```
+
+確認できるのは、「最後にコードを変更した後、テンプレートが求める検証が成功しているか」、やり直しの回数、権限で止められた回数、skill とレビュー用サブエージェントの利用状況です。いずれも目安であり、結論は該当するセッションを読んで判断します。
+
 ## ライセンス
 
 MIT
