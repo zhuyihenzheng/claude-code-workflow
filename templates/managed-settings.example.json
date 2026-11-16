@@ -1,0 +1,40 @@
+{
+  "permissions": {
+    "deny": [
+      "Bash(curl *)",
+      "Bash(wget *)",
+      "Read(/**/.env)",
+      "Read(/**/.env.*)"
+    ],
+    "disableBypassPermissionsMode": "disable"
+  },
+  "allowManagedMcpServersOnly": true,
+  "allowedMcpServers": [
+    {
+      "serverName": "playwright"
+    }
+  ],
+  "strictKnownMarketplaces": [],
+  "allowManagedModsOnly": true,
+  "disableClaudeAiConnectors": true,
+  "enableArtifact": false,
+  "sandbox": {
+    "enabled": true,
+    "allowUnsandboxedCommands": false,
+    "network": {
+      "allowedDomains": [
+        "repo.maven.apache.org",
+        "registry.npmjs.org"
+      ],
+      "allowManagedDomainsOnly": true
+    }
+  },
+  "env": {
+    "DISABLE_TELEMETRY": "1",
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"
+  },
+  "cleanupPeriodDays": 7,
+  "companyAnnouncements": [
+    "顧客情報・本番データ・認証情報を AI ツールに渡さないこと。詳細は社内の AI 利用ガイドラインを参照。"
+  ]
+}

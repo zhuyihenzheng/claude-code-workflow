@@ -4,6 +4,8 @@
 
 [中文](README.md)
 
+> **社内利用版（`company` ブランチ）**：リモートの MCP サービスには既定で接続せず、サードパーティのプラグイン／mod は推奨しません。claude.ai コネクタと Artifact の公開も無効にしています。情報セキュリティ部門向けの資料は [セキュリティレビュー資料](docs/security-review.ja.md) を参照してください。
+
 **Java + Spring Boot（JSP / HTMX）** のプロジェクトに Claude Code をチームで導入するためのハンドブックとテンプレートです。プロジェクトルールは `AGENTS.md` を唯一の正本とし、GitHub Copilot と共用します。
 
 | 構成 | 内容 | 言語 |
@@ -52,7 +54,7 @@ CLAUDE.md                         @AGENTS.md と Claude Code 固有の補足
 .claude/README.md                 設定ガイド（人向け、セッションには読み込まれない）
 .github/copilot-instructions.md   Copilot 向けの要約
 .github/instructions/             rules から生成する Copilot のパス別指示
-.mcp.json                         Context7 と Playwright（--isolated）
+.mcp.json                         Playwright（--isolated、ローカルプロセス、バージョン固定）
 scripts/sync_rules.py             rules から Copilot の指示を生成し、--check で差分を検出する
 scripts/htmx-check.mjs            実ブラウザーで HTMX のフラグメント置換を検証する（ログイン状態、セッション失効に対応）
 scripts/xlsx2ai.py                Excel 設計書をシート単位の JSON／Mermaid に変換する

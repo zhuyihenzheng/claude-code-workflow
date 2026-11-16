@@ -106,6 +106,30 @@ class TemplateTests(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertFalse(denied(command))
 
+    def test_company_edition_hardening(self):
+        settings = json.loads((PROJECT / '.claude/settings.json').read_text(encoding='utf-8'))
+        self.assertIs(settings['disableClaudeAiConnectors'], True)
+        self.assertIs(settings['enableArtifact'], False)
+        self.assertEqual(settings['permissions']['disableBypassPermissionsMode'], 'disable')
+        for rule in ('Bash(curl *)', 'Bash(wget *)'):
+            self.assertIn(rule, settings['permissions']['deny'])
+        self.assertNotIn('enabledPlugins', settings)
+        self.assertNotIn('extraKnownMarketplaces', settings)
+        # No file in the repository asks a team to enable third-party plugins or marketplaces.
+        for path in (ROOT / 'templates').rglob('*.json'):
+            if path.name == 'managed-settings.example.json':
+                continue
+            text = path.read_text(encoding='utf-8')
+            self.assertNotIn('enabledPlugins', text, path)
+            self.assertNotIn('extraKnownMarketplaces', text, path)
+        managed = json.loads((ROOT / 'templates/managed-settings.example.json').read_text(encoding='utf-8'))
+        self.assertIs(managed['allowManagedMcpServersOnly'], True)
+        self.assertIs(managed['allowManagedModsOnly'], True)
+        self.assertEqual(managed['allowedMcpServers'], [{'serverName': 'playwright'}])
+        self.assertEqual(managed['strictKnownMarketplaces'], [])
+        self.assertIs(managed['sandbox']['allowUnsandboxedCommands'], False)
+        self.assertNotIn('xxxxxxxx', json.dumps(managed))
+
     def test_mentions_are_separate_from_pr_automation(self):
         data = workflow('claude.yml')
         self.assertNotIn('pull_request', data['on'])
@@ -148,8 +172,13 @@ class TemplateTests(unittest.TestCase):
     def test_active_mcp_needs_no_secrets_and_versions_are_pinned(self):
         active = json.loads((PROJECT / '.mcp.json').read_text(encoding='utf-8'))['mcpServers']
         self.assertNotIn('${', json.dumps(active))
-        self.assertNotIn('dbhub', active)
-        self.assertNotIn('github', active)
+        # Company edition: nothing in the default set talks to a remote MCP service.
+        self.assertEqual(set(active), {'playwright'})
+        for server in active.values():
+            self.assertNotIn('url', server)
+            self.assertNotEqual(server.get('type'), 'http')
+        optional = json.loads((ROOT / 'templates/mcp.optional.json').read_text(encoding='utf-8'))['mcpServers']
+        self.assertEqual(set(optional), {'context7', 'dbhub', 'github'})
         for path in (ROOT / 'templates').rglob('*mcp*.json'):
             servers = json.loads(path.read_text(encoding='utf-8'))['mcpServers']
             for server in servers.values():

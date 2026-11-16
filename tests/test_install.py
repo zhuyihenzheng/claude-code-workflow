@@ -89,23 +89,43 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(merged['model'], 'sonnet')
         self.assertEqual(merged['hooks'], {'Stop': []})
         self.assertEqual(merged['permissions']['defaultMode'], 'default')
+        self.assertEqual(merged['permissions']['disableBypassPermissionsMode'], 'disable')
+        self.assertIs(merged['disableClaudeAiConnectors'], True)
+        self.assertIs(merged['enableArtifact'], False)
         self.assertEqual(merged['permissions']['allow'][:2], ['Bash(npm test)', 'Bash(./mvnw *)'])
         for key in ('allow', 'deny', 'ask'):
             for rule in template['permissions'][key]:
                 self.assertEqual(merged['permissions'][key].count(rule), 1)
         self.assertEqual(self.kinds()['.claude/settings.json'], 'skip')
 
+    def test_existing_hardening_values_win_and_are_reported(self):
+        settings = self.target / '.claude/settings.json'
+        settings.parent.mkdir()
+        settings.write_text(json.dumps({'enableArtifact': True, 'permissions': {'disableBypassPermissionsMode': 'allow'}}),
+                            encoding='utf-8')
+        action = {a.rel: a for a in install.plan_project(self.target)}['.claude/settings.json']
+        merged = json.loads(action.content)
+        self.assertIs(merged['enableArtifact'], True)
+        self.assertEqual(merged['permissions']['disableBypassPermissionsMode'], 'allow')
+        self.assertIs(merged['disableClaudeAiConnectors'], True)
+        self.assertIn("'enableArtifact' differs from template; kept existing", action.note)
+        self.assertIn('"permissions.disableBypassPermissionsMode" differs', action.note)
+
     def test_existing_mcp_server_wins(self):
-        (self.target / '.mcp.json').write_text(json.dumps({'mcpServers': {
+        mcp = self.target / '.mcp.json'
+        mcp.write_text(json.dumps({'mcpServers': {
             'playwright': {'command': 'npx', 'args': ['-y', '@playwright/mcp@0.0.1']},
             'other': {'type': 'http', 'url': 'https://example.invalid/mcp'},
         }}), encoding='utf-8')
         action = {a.rel: a for a in install.plan_project(self.target)}['.mcp.json']
+        # Nothing to add: the only template server already exists, in the project's own version.
+        self.assertEqual(action.kind, 'skip')
         self.assertIn("'playwright' differs", action.note)
-        servers = json.loads(action.content)['mcpServers']
-        self.assertEqual(servers['playwright']['args'][1], '@playwright/mcp@0.0.1')
-        self.assertIn('other', servers)
-        self.assertIn('context7', servers)
+        mcp.write_text(json.dumps({'mcpServers': {'other': {'type': 'http', 'url': 'https://example.invalid/mcp'}}}),
+                       encoding='utf-8')
+        action = {a.rel: a for a in install.plan_project(self.target)}['.mcp.json']
+        self.assertEqual(action.kind, 'merge')
+        self.assertEqual(set(json.loads(action.content)['mcpServers']), {'other', 'playwright'})
 
     def test_invalid_json_is_a_conflict_and_left_untouched(self):
         (self.target / '.mcp.json').write_text('{ broken', encoding='utf-8')

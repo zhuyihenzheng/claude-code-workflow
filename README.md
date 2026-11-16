@@ -4,6 +4,8 @@
 
 [日本語](README.ja.md)
 
+> **公司版（`company` 分支）**：默认不连接任何远程 MCP 服务、不推荐任何第三方插件或 mod、关闭 claude.ai 连接器与 Artifact 发布，并附给信息安全部门的说明。差异与导入步骤见 [12 · 公司环境](docs/12-公司环境.md)。
+
 面向 **Java + Spring Boot 后端 / JSP、HTMX 或两者并用** 项目的 Claude Code 团队工作流，与 GitHub Copilot 共用一份 AGENTS.md。仓库包含三部分：
 
 - **手册**（[docs/](docs/)，中文）：规划、搭建、标准回路、工具选型、避坑；
@@ -36,7 +38,8 @@
 | [10 · PR 指摘对应](docs/10-PR指摘对应.md) | PR #1 的 10 条 review 逐条对应，作为“修复后交给 Claude 复审”的实例 |
 | [11 · Excel 设计书](docs/11-Excel设计书.md) | 省 token 的读取方案：工具实测比较、`xlsx2ai.py` 增量转换（sheet JSON + Mermaid 流程图）、MCP 的定位 |
 | [templates/](templates/README.md) | 模板的前置条件、安装规则、权限语义、可选 hook 与 workflow 的说明 |
-| [templates/user/](templates/user/README.md) | 个人级（`~/.claude`）推荐：插件 / mods 安装清单、3 个中文触发的通用 skill |
+| [12 · 公司环境](docs/12-公司环境.md) | 公司版与公开版的差异、导入步骤、给管理员的 managed settings 示例；[セキュリティレビュー資料（日本語）](docs/security-review.ja.md) |
+| [templates/user/](templates/user/README.md) | 个人级（`~/.claude`）：mod 的使用口径、3 个中文触发的通用 skill |
 
 ## 分阶段落地路线图（摘要）
 
@@ -72,7 +75,7 @@ CLAUDE.md                         @AGENTS.md + Claude Code 专属补充
 .claude/README.md                 给人看的配置说明（不进会话上下文）
 .github/copilot-instructions.md   Copilot 入口摘要
 .github/instructions/             由 rules 生成的 Copilot 路径指令
-.mcp.json                         Context7 + 隔离的 Playwright
+.mcp.json                         隔离的 Playwright（本地进程，固定版本）
 scripts/sync_rules.py             rules → Copilot 指令的同步与 --check
 scripts/htmx-check.mjs            真实浏览器验证 HTMX 片段替换（含登录态、会话失效）
 scripts/xlsx2ai.py                Excel 设计书 → 按 sheet 拆分的 JSON / Mermaid

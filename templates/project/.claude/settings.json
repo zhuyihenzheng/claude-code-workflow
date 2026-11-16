@@ -41,10 +41,15 @@
       "Bash(git push * --force)",
       "Bash(git push * --force *)",
       "Bash(git push * -f)",
-      "Bash(git push * -f *)"
+      "Bash(git push * -f *)",
+      "Bash(curl *)",
+      "Bash(wget *)"
     ],
     "ask": [
       "Edit(/src/main/resources/db/migration/**)"
-    ]
-  }
+    ],
+    "disableBypassPermissionsMode": "disable"
+  },
+  "disableClaudeAiConnectors": true,
+  "enableArtifact": false
 }

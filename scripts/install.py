@@ -7,7 +7,7 @@ Existing files are never overwritten:
 * missing file             -> create (byte-for-byte copy)
 * identical file           -> skip
 * settings.json / .mcp.json -> merge (union of permission rules, add missing
-  MCP servers; existing values win, ``hooks`` is never added)
+  MCP servers and hardening switches; existing values win, ``hooks`` is never added)
 * .gitignore               -> merge (missing lines go first, so existing rules,
   which git reads later, keep precedence)
 * .gitattributes           -> merge (missing lines are appended)
@@ -42,6 +42,8 @@ LINE_MERGE = {'.gitignore', '.gitattributes'}
 WORKFLOWS = '.github/workflows/'
 KINDS = ('create', 'merge', 'skip', 'conflict', 'optional', 'error')
 PERMISSION_LISTS = ('allow', 'deny', 'ask')
+# Top-level switches the company edition turns off; added when absent, never overwritten.
+HARDENING_KEYS = ('disableClaudeAiConnectors', 'enableArtifact')
 IGNORED_PARTS = {'__pycache__'}
 
 
@@ -89,7 +91,18 @@ def merge_settings(existing, template):
                     notes.append(f'existing allow also contains {key} rule {rule!r}; review it')
         broad = [r for r in allowed if re.search(r'mvnw(\.cmd)?(:| )\*\)$', r.strip())]
         notes.extend(f'broad rule {r!r} also allows deploy/arbitrary goals; consider removing' for r in sorted(broad))
+        # Scalar permission keys (e.g. disableBypassPermissionsMode): add when absent, existing value wins.
+        for key, value in template['permissions'].items():
+            if key not in PERMISSION_LISTS and key not in permissions:
+                permissions[key] = value
+            elif key not in PERMISSION_LISTS and permissions[key] != value:
+                notes.append(f'"permissions.{key}" differs from template; kept existing')
         merged['permissions'] = permissions
+    for key in HARDENING_KEYS:
+        if key in template and key not in merged:
+            merged[key] = template[key]
+        elif key in template and merged[key] != template[key]:
+            notes.append(f'{key!r} differs from template; kept existing')
     if 'mcpServers' in template:
         current = merged.get('mcpServers')
         if current is not None and not isinstance(current, dict):

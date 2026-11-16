@@ -38,8 +38,8 @@
    已有的 `Bash(./mvnw *)` 等宽泛规则或与模板 deny/ask 冲突的 allow 会在输出中提示。脚本不删除任何文件，合并后仍须 `git diff` 审查再提交。不用脚本时按相同规则逐项手动合并，不要整目录覆盖。
 2. AGENTS.md 的“チーム共通ルール”跨系统原样复制；只在“本システム固有情報”填写 JSP / HTMX / 两者并用、版本、样例路径、启动方式与测试类。MyBatis 项目保留 Mapper，不引入 JPA；外部 Tomcat/WAR 使用自己的部署命令。CLAUDE.md 保持 `@AGENTS.md` 导入，只放 agent 需要的 Claude Code 补充；给人看的配置说明在 [`.claude/README.md`](project/.claude/README.md)（日文，不会加载进会话）。
 3. 手动运行目标项目的 `./mvnw -q compile`、相关测试和 `./mvnw verify`；Windows CMD 用 `mvnw.cmd`，Git Bash 用 `./mvnw.cmd`，PowerShell 用 `.\mvnw.cmd`，参数相同。先解决环境问题，再考虑可选 hook。
-4. 按需合并 `.mcp.json`。默认只有 Context7（无密钥公共访问）和隔离 Playwright；不用的 server 直接移除。
-5. DBHub / GitHub 是 [可选配置](mcp.optional.json)。只合并需要的 server，并在启动前提供 `DATABASE_URL` / `GITHUB_PERSONAL_ACCESS_TOKEN`；DBHub 只能用开发/测试库的只读账号。Context7 需要认证时可按其官方文档加 `CONTEXT7_API_KEY` header。
+4. 按需合并 `.mcp.json`。默认只有隔离的 Playwright（本地进程）；不做页面验证的项目直接移除。
+5. Context7 / DBHub / GitHub 是 [可选配置](mcp.optional.json)。Context7 与 GitHub 是远程服务，启用前须获公司批准。只合并需要的 server，并在启动前提供 `DATABASE_URL` / `GITHUB_PERSONAL_ACCESS_TOKEN`；DBHub 只能用开发/测试库的只读账号。Context7 需要认证时可按其官方文档加 `CONTEXT7_API_KEY` header。
 6. GitHub 集成按下面的 workflow 分别配置认证：交互模式使用 Claude GitHub App，自动评审示例使用只读 workflow token；两者都需模型凭据。安装脚本默认不复制它们，需要时加 `--with-workflows`。
 
 ## HTMX 页面检查脚本
