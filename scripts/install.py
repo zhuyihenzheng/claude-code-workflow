@@ -17,11 +17,16 @@ Existing files are never overwritten:
 * .github/workflows/*      -> optional (only with --with-workflows: they run
   with repository permissions and need secrets)
 
-Exit code: 0 on success, 1 if a file could not be written.
+``doctor`` checks a project that already has the templates: placeholders left in
+AGENTS.md, the CLAUDE.md import, permission rules, MCP servers, generated Copilot
+instructions and tracked secrets. It only reads.
+
+Exit code: 0 on success, 1 if a file could not be written or ``doctor`` found a failure.
 
 Usage:
     python3 scripts/install.py project /path/to/project [--apply] [--diff] [--with-workflows]
     python3 scripts/install.py user [--claude-dir ~/.claude] [--apply] [--diff]
+    python3 scripts/install.py doctor /path/to/project
 """
 import argparse
 import difflib
@@ -30,6 +35,7 @@ import os
 import re
 from pathlib import Path
 import shutil
+import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -248,6 +254,89 @@ def report(actions, applied, out=None, show_diff=False):
                 print('\n' + diff, file=out)
 
 
+def doctor(target):
+    """Read-only health check of an adopted project. Returns [(level, message)], level in ok/warn/fail."""
+    findings = []
+
+    def add(level, message):
+        findings.append((level, message))
+
+    def text(rel):
+        path = target / rel
+        return path.read_text(encoding='utf-8', errors='replace') if path.is_file() else None
+
+    agents = text('AGENTS.md')
+    if agents is None:
+        add('fail', 'AGENTS.md is missing: the agent has no project rules')
+    else:
+        todo = agents.count('<!-- TODO')
+        add('fail' if todo else 'ok', f'AGENTS.md: {todo} TODO placeholder(s) left; the agent reads them as missing project facts'
+            if todo else 'AGENTS.md: no TODO placeholders left')
+        lines = len(agents.splitlines())
+        add('warn' if lines >= 150 else 'ok', f'AGENTS.md: {lines} lines (budget: under 150, it is loaded into every session)')
+    claude_md = text('CLAUDE.md')
+    if claude_md is not None:
+        imported = '@AGENTS.md' in claude_md
+        add('ok' if imported else 'fail', 'CLAUDE.md imports @AGENTS.md' if imported
+            else 'CLAUDE.md exists without @AGENTS.md: Claude Code then ignores AGENTS.md')
+    skill = text('.claude/skills/spring-endpoint/SKILL.md')
+    if skill is not None and '<!-- TODO' in skill:
+        add('warn', '.claude/skills/spring-endpoint/SKILL.md: reference path placeholder not filled in')
+
+    raw = text('.claude/settings.json')
+    if raw is None:
+        add('warn', '.claude/settings.json is missing: no shared permission rules')
+    else:
+        try:
+            settings = json.loads(raw)
+            permissions = settings.get('permissions') or {}
+            allow, deny = permissions.get('allow') or [], permissions.get('deny') or []
+        except (ValueError, AttributeError):
+            settings = None
+            add('fail', '.claude/settings.json is not a valid settings object')
+        if settings is not None:
+            broad = sorted(r for r in allow if isinstance(r, str) and re.search(r'mvnw(\.cmd)?(:| )\*\)$', r.strip()))
+            add('warn' if broad else 'ok', f'broad Maven allow rule(s) {broad} also permit deploy and arbitrary goals'
+                if broad else 'no broad Maven allow rule')
+            env_denied = any(isinstance(r, str) and r.startswith('Read(') and '.env' in r for r in deny)
+            add('ok' if env_denied else 'warn', 'reading .env files is denied' if env_denied
+                else 'no Read deny rule for .env files')
+            if settings.get('hooks'):
+                add('warn', 'hooks are registered: review them like CI changes, they run commands as the user')
+
+    raw = text('.mcp.json')
+    if raw is not None:
+        try:
+            servers = json.loads(raw).get('mcpServers') or {}
+        except (ValueError, AttributeError):
+            servers = None
+            add('fail', '.mcp.json is not valid JSON')
+        for name, config in sorted((servers or {}).items()):
+            if not isinstance(config, dict):
+                continue
+            if config.get('url'):
+                add('warn', f'MCP server {name!r} is a remote service: what is sent to it leaves the machine')
+            args = [a for a in config.get('args') or [] if isinstance(a, str)]
+            if config.get('command') == 'npx' and not any(re.search(r'@\d+\.\d+\.\d+', a) for a in args):
+                add('warn', f'MCP server {name!r} is started with npx without a pinned version')
+
+    sync = target / 'scripts/sync_rules.py'
+    if sync.is_file() and (target / '.claude/rules').is_dir():
+        result = subprocess.run([sys.executable, str(sync), str(target), '--check'], capture_output=True, text=True,
+                                encoding='utf-8', errors='replace')
+        add('ok' if result.returncode == 0 else 'fail', '.github/instructions/ matches .claude/rules/' if result.returncode == 0
+            else '.github/instructions/ is out of sync with .claude/rules/: run scripts/sync_rules.py')
+
+    git = shutil.which('git')
+    if git and (target / '.git').exists():
+        tracked = subprocess.run([git, '-C', str(target), 'ls-files', '--', '.claude/settings.local.json', 'CLAUDE.local.md',
+                                  '.env', '.env.*', ':(glob)**/.env'], capture_output=True, text=True).stdout.split()
+        tracked = sorted(t for t in tracked if not t.endswith('.env.example'))
+        add('fail' if tracked else 'ok', f'tracked by git but must stay local: {tracked}' if tracked
+            else 'no local settings or .env files are tracked by git')
+    return findings
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     sub = parser.add_subparsers(dest='scope', required=True)
@@ -257,10 +346,23 @@ def main(argv=None):
     user.add_argument('--claude-dir', type=Path, default=Path.home() / '.claude')
     project.add_argument('--with-workflows', action='store_true',
                          help='also install .github/workflows/ (they need secrets and repository permissions)')
+    check = sub.add_parser('doctor', help='check a project that already has the templates (read-only)')
+    check.add_argument('target', type=Path)
     for p in (project, user):
         p.add_argument('--apply', action='store_true', help='write changes (default: dry run)')
         p.add_argument('--diff', action='store_true', help='print a unified diff for every conflict')
     args = parser.parse_args(argv)
+
+    if args.scope == 'doctor':
+        target = args.target.expanduser().resolve()
+        if not target.is_dir():
+            parser.error(f'target is not a directory: {target}')
+        findings = doctor(target)
+        for level, message in findings:
+            print(f'{level:<4}  {message}')
+        counts = {level: sum(found == level for found, _ in findings) for level in ('ok', 'warn', 'fail')}
+        print('\n' + ', '.join(f'{level}: {count}' for level, count in counts.items()))
+        return 1 if counts['fail'] else 0
 
     if args.scope == 'project':
         target = args.target.expanduser().resolve()
