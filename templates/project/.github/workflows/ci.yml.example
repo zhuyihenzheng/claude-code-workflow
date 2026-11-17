@@ -36,3 +36,42 @@ jobs:
       #   run: python3 scripts/xlsx2ai.py --check
       - name: Build and test
         run: ./mvnw -B verify
+
+  # 画面試験（screen-tests/ を導入している場合に有効にする）。アプリケーションの起動方法とテストデータの
+  # 初期化はプロジェクトに合わせる。資格情報は合成データのテストアカウントを Secrets から渡す。
+  # screen-tests:
+  #   runs-on: ubuntu-latest
+  #   timeout-minutes: 30
+  #   env:
+  #     TEST_ENGINE: playwright
+  #     TEST_BROWSER_CHANNEL: chromium
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #       with:
+  #         persist-credentials: false
+  #     - uses: actions/setup-java@v4
+  #       with:
+  #         distribution: temurin
+  #         java-version: '21'
+  #         cache: maven
+  #     - uses: actions/setup-node@v4
+  #       with:
+  #         node-version: '22'
+  #     - name: Start the application
+  #       run: |
+  #         ./mvnw -B -q spring-boot:run > app.log 2>&1 &
+  #         for _ in $(seq 1 90); do curl -fsS http://localhost:8080/ > /dev/null 2>&1 && break; sleep 2; done
+  #     - name: Run screen tests
+  #       working-directory: screen-tests
+  #       run: |
+  #         npm install --no-audit --no-fund
+  #         npx playwright install --with-deps chromium
+  #         node run.mjs --engine playwright
+  #     - if: always()
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: screen-tests
+  #         path: |
+  #           screen-tests/report.html
+  #           screen-tests/試験結果.xlsx
+  #           screen-tests/out/junit.xml

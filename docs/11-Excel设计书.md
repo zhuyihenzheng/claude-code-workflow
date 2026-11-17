@@ -54,6 +54,8 @@ python scripts/xlsx2ai.py specs specs-ai --extract-media
 - **合并单元格**：light 模式不输出合并范围，只保留带行列号的值。需要时对个别 sheet 用 `exstruct -m standard`（图形与合并信息在 Windows + Excel COM 下最完整）。
 - **是否提交 `specs-ai/`**：提交后 Copilot 等其他工具也能用、diff 可审；含客户信息的设计书按 AGENTS.md 的数据规则处理，必要时只在本地生成并加入 `.gitignore`。
 
+修改 Excel 原本的做法见 [14 · 改修流程与画面试验](14-改修流程与画面试验.md#2-改-excelai-只写变更指示脚本负责写入和核对)：AI 写变更指示，`xlsx_patch.py` 写入并核对。
+
 ## 4. MCP 的定位
 
 需要在对话中临时查询大表时再加：[ExStruct MCP](https://github.com/harumiWeb/exstruct)（`exstruct_read_json_chunk` 分块读取）、[jwadow/mcp-excel](https://github.com/jwadow/mcp-excel)（只取需要的数据）、[negokaz/excel-mcp-server](https://github.com/negokaz/excel-mcp-server)（`EXCEL_MCP_PAGING_CELLS_LIMIT` 分页）。每次调用都会重新解析，读设计书比预转换更费。

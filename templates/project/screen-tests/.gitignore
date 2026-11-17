@@ -1,0 +1,11 @@
+node_modules/
+.env
+.env.*
+!.env.example
+# 実行のたびに変わる出力と、画面の証跡（実データが写る場合がある）
+out/
+evidence/
+report.html
+visual-baseline/
+.agent-model/
+midscene_run/

@@ -35,6 +35,7 @@
 | [09 · 审查与修复](docs/09-审查与修复.md) | 按轮次记录的问题、修复、验证结果与剩余限制（历史记录，只追加） |
 | [10 · PR 指摘对应](docs/10-PR指摘对应.md) | PR #1 的 10 条 review 逐条对应，作为“修复后交给 Claude 复审”的实例 |
 | [11 · Excel 设计书](docs/11-Excel设计书.md) | 省 token 的读取方案：工具实测比较、`xlsx2ai.py` 增量转换（sheet JSON + Mermaid 流程图）、MCP 的定位 |
+| [14 · 改修流程与画面试验](docs/14-改修流程与画面试验.md) | 设计书 → 实现 → 测试 → 画面试验 → 试验书的一条流程；整合 midscene-poc；用变更指示安全地改 Excel |
 | [13 · 控制矩阵](docs/13-控制矩阵.md) | 每条要求写在哪、谁拦、谁证明、还缺什么；导入后的 `doctor` 检查 |
 | [templates/](templates/README.md) | 模板的前置条件、安装规则、权限语义、可选 hook 与 workflow 的说明 |
 | [templates/user/](templates/user/README.md) | 个人级（`~/.claude`）推荐：插件 / mods 安装清单、3 个中文触发的通用 skill |
@@ -55,6 +56,7 @@
 python3 scripts/install.py project /path/to/your-project          # 预演：只打印计划，不写文件
 python3 scripts/install.py project /path/to/your-project --diff   # 预演，并打印与已有文件的差异
 python3 scripts/install.py project /path/to/your-project --apply  # 写入
+python3 scripts/install.py project /path/to/your-project --apply --with-screen-tests   # 连同画面试验（midscene-poc）
 python3 scripts/install.py doctor /path/to/your-project           # 导入后检查：TODO 是否填完、规则是否同步、配置有无风险
 python3 scripts/install.py user --apply                           # 个人级 skills → ~/.claude/skills
 ```
@@ -70,6 +72,7 @@ CLAUDE.md                         @AGENTS.md + Claude Code 专属补充
 .claude/rules/{jsp,htmx}.md       按路径加载的页面规则
 .claude/agents/code-reviewer.md   只读评审子代理
 .claude/skills/spring-endpoint/   新增接口 / 页面片段的标准流程
+.claude/skills/change-flow/       改修的标准流程：设计书 → 实现 → 单体测试 → 画面试验 → 试验书
 .claude/hooks/verify-stop.py      Stop hook 参考样例（未注册）
 .claude/README.md                 给人看的配置说明（不进会话上下文）
 .github/copilot-instructions.md   Copilot 入口摘要
@@ -78,6 +81,8 @@ CLAUDE.md                         @AGENTS.md + Claude Code 专属补充
 scripts/sync_rules.py             rules → Copilot 指令的同步与 --check
 scripts/htmx-check.mjs            真实浏览器验证 HTMX 片段替换（含登录态、会话失效）
 scripts/xlsx2ai.py                Excel 设计书 → 按 sheet 拆分的 JSON / Mermaid
+scripts/xlsx_patch.py             按变更指示改 Excel：只动指定的单元格，其余逐字节不变
+screen-tests/                     （可选）画面试验：固定版本的 midscene-poc
 .gitignore / .gitattributes       补充缺失规则
 ```
 
@@ -94,6 +99,7 @@ python3 -m unittest discover -s tests -v
 | `htmx-check.mjs`：真实 htmx 与 Chromium（Ubuntu） | 原生 Windows 上的 Claude Code、Maven 与 MCP |
 | 安装 → `./mvnw verify` → 页面检查：真实 Spring Boot + JSP + HTMX 示例应用（Ubuntu） | Claude Code 会话实际加载情况、GitHub App 与付费 Action |
 | 固定版本的 Playwright MCP 与 DBHub：MCP 握手并列出工具（Ubuntu）；workflow 文件：actionlint | 两个 MCP server 的实际浏览器操作与真实数据库 |
+| 画面试验：示例应用上从 GitHub 按 SHA 安装框架并实际运行；`xlsx_patch.py` 改写运行生成的试验结果（Ubuntu） | 真实业务项目上的画面试验；`change-flow` 在真实改修任务上的表现 |
 | Stop hook 参考样例：模拟与真实 Maven（仅 POSIX） | Copilot 各入口是否读取 AGENTS.md 与路径指令 |
 
 本地测试不调用 Claude API；缺少 Playwright 时浏览器测试会跳过，CI 中强制执行。逐轮的问题与修复记录见 [09 · 审查与修复](docs/09-审查与修复.md)，Windows 搭建见 [02 · 基础搭建](docs/02-基础搭建.md#6-windows-两条路径)。

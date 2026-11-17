@@ -106,6 +106,51 @@ class TemplateTests(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertFalse(denied(command))
 
+    def test_screen_test_permissions(self):
+        perms = json.loads((PROJECT / '.claude/settings.json').read_text(encoding='utf-8'))['permissions']
+
+        def matching(kind, command):
+            return [rule for rule in perms[kind] if rule.startswith('Bash(') and rule_matches(rule[5:-1], command)]
+
+        for command in ('node run.mjs --engine playwright', 'node run.mjs --engine playwright --build-only',
+                        'node run.mjs --engine playwright --only 01-order'):
+            with self.subTest(command=command):
+                self.assertTrue(matching('allow', command))
+                self.assertFalse(matching('deny', command) or matching('ask', command))
+        # Only a person may accept a known NG or a changed screenshot.
+        for command in ('node run.mjs --update-baseline', 'node run.mjs --engine playwright --update-baseline --eval-only',
+                        'node screen-tests/run.mjs --engine playwright --update-visual'):
+            with self.subTest(command=command):
+                self.assertTrue(matching('deny', command))
+        # Engines and options that send screenshots to a model need a confirmation each time.
+        for command in ('node run.mjs --engine ai', 'node run.mjs --engine midscene --only 01-order',
+                        'node run.mjs --engine playwright --heal', 'node run.mjs --engine playwright --ai-assert'):
+            with self.subTest(command=command):
+                self.assertTrue(matching('ask', command))
+                self.assertFalse(matching('deny', command))
+        self.assertIn('Edit(/screen-tests/baseline.json)', perms['ask'])
+        self.assertIn('Read(/screen-tests/report.html)', perms['deny'])
+
+    def test_screen_test_template_pins_the_framework_and_matches_the_fixture(self):
+        package = json.loads((PROJECT / 'screen-tests/package.json').read_text(encoding='utf-8'))
+        self.assertRegex(package['devDependencies']['midscene-poc'], r'^github:zhuyihenzheng/midscene-poc#[0-9a-f]{40}$')
+        # No npm scripts: the permission rules match `node run.mjs …`, and `npm test -- --update-baseline` would slip past them.
+        self.assertNotIn('scripts', package)
+        # One Playwright version for the screen tests and for this repository's own browser tests.
+        workflow = (ROOT / '.github/workflows/validate.yml').read_text(encoding='utf-8')
+        self.assertIn(f"playwright@{package['devDependencies']['playwright']} ", workflow)
+        for name in ('screen-tests/README.md', '.claude/skills/change-flow/SKILL.md'):
+            self.assertNotRegex((PROJECT / name).read_text(encoding='utf-8'), r'npm (run build|test)\b', name)
+        fixture = ROOT / 'tests/fixtures/sample-app'
+        for name in ('site.mjs', 'cases.mjs', 'run.mjs'):
+            text = (fixture / 'screen-tests' / name).read_text(encoding='utf-8')
+            self.assertNotIn('../core/', text, 'the fixture uses the framework as a dependency')
+        self.assertTrue((fixture / 'docs/設計書.md').is_file())
+        # Every script the change-flow skill names exists in the template.
+        skill = (PROJECT / '.claude/skills/change-flow/SKILL.md').read_text(encoding='utf-8')
+        for script in set(re.findall(r'scripts/[\w.-]+\.(?:py|mjs)', skill)):
+            self.assertTrue((PROJECT / script).is_file(), script)
+
     def test_mentions_are_separate_from_pr_automation(self):
         data = workflow('claude.yml')
         self.assertNotIn('pull_request', data['on'])
