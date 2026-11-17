@@ -3,7 +3,7 @@
   "private": true,
   "description": "画面試験（midscene-poc）。設計書からケースを書き、実ブラウザーで実行して試験仕様書・試験結果・証跡を出力する",
   "devDependencies": {
-    "midscene-poc": "github:zhuyihenzheng/midscene-poc#4d01913b7cf347118a8c40841606e5480d12b494",
+    "midscene-poc": "github:zhuyihenzheng/midscene-poc#bac60a7db489bcc69309f49ab01a836ce63509ab",
     "playwright": "1.65.1"
   }
 }
