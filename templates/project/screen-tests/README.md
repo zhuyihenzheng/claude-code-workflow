@@ -1,6 +1,6 @@
 # 画面試験
 
-設計書をもとにケース（`cases.mjs`）を書き、実ブラウザーで実行して、試験仕様書・試験結果・証跡を出力する。フレームワークは [midscene-poc](https://github.com/zhuyihenzheng/midscene-poc) を、コミット SHA を固定して使用する（`package.json`）。
+設計書をもとにケース（`cases.mjs`）を書き、実ブラウザーで実行して、試験仕様書・試験結果・証跡を出力する。フレームワークは [midscene-poc](https://github.com/zhuyihenzheng/midscene-poc) を、コミット SHA を固定して使用する（`package.json`。Playwright のバージョンも固定している）。
 
 ## 初回のセットアップ
 
@@ -19,10 +19,12 @@ GitHub から取得できない環境では、midscene-poc のリポジトリで
 
 | コマンド | 内容 |
 |---|---|
-| `npm run build` | ブラウザーを使わずに、ケースの書き方・辞書・設計書との対応（`観点カバレッジ.md`）を確認し、`試験仕様書.xlsx` を生成する |
-| `npm test` | Playwright エンジンで実行する（AI モデル不要）。アプリケーションは起動しておく |
+| `node run.mjs --engine playwright --build-only` | ブラウザーを使わずに、ケースの書き方と辞書を確認し、`試験仕様書.xlsx` を生成する。`site.mjs` に `design` を指定している場合は `観点カバレッジ.md` も生成する |
+| `node run.mjs --engine playwright` | Playwright エンジンで実行する（AI モデル不要）。アプリケーションは起動しておく |
 | `node run.mjs --engine playwright --only 01-xxx` | 1 スイートだけ実行する |
 | `npx screen-test-explore site.mjs` | 画面を採取し、`inventory/inventory.md` に入力項目・ボタン・メッセージを出力する |
+
+`観点カバレッジ.md`（設計書の項目にケースがあるか、根拠のない期待値がないか）は、Markdown の設計書だけを対象とする。Excel の設計書だけのプロジェクトでは生成されないため、設計書とケースの対応は観点表を作成して人が確認する。
 
 ## 結果の見方
 

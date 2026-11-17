@@ -206,6 +206,59 @@ class XlsxPatchTests(unittest.TestCase):
         self.assertIn('指示どおりになっていません：試験結果!C3', log)
 
 
+    def resave(self, source, dest, edit=None, styles=None, extra=None):
+        """Copy a workbook the way a re-save would: new metadata, optionally other edits."""
+        with zipfile.ZipFile(source) as src, zipfile.ZipFile(dest, 'w', zipfile.ZIP_DEFLATED) as dst:
+            for item in src.infolist():
+                data = src.read(item.filename)
+                if item.filename == 'docProps/core.xml':
+                    data = data.replace(b'</cp:coreProperties>', b'<cp:revision>9</cp:revision></cp:coreProperties>')
+                if item.filename == 'xl/styles.xml' and styles:
+                    data = styles(data.decode('utf-8')).encode('utf-8')
+                if item.filename == 'xl/worksheets/sheet1.xml' and edit:
+                    data = edit(data.decode('utf-8')).encode('utf-8')
+                dst.writestr(item.filename, data)
+            for name, data in (extra or {}).items():
+                dst.writestr(name, data)
+
+    def test_diff_accepts_a_resave_that_changes_only_the_instructed_cell(self):
+        patch = self.patch({'sheet': '試験結果', 'table': {'key': 'ケースID', 'rows': {'C-01': {'判定': {'from': 'NG', 'to': '既知NG'}}}}})
+        applied = self.dir / 'applied.xlsx'
+        self.assertEqual(run('apply', self.book, patch, '--out', applied)[0], 0)
+
+        # Metadata changes, and the style table gains an unused font and an unused style: same cells, same look.
+        def unused_style(xml):
+            fonts = int(xlsx_patch.re.search(r'<fonts count="(\d+)"', xml).group(1))
+            xml = xml.replace(f'<fonts count="{fonts}"', f'<fonts count="{fonts + 1}"').replace(
+                '</fonts>', '<font><sz val="20"/><name val="Unused"/></font></fonts>')
+            return xml.replace('</cellXfs>', f'<xf numFmtId="0" fontId="{fonts}" fillId="0" borderId="0" xfId="0"/></cellXfs>')
+
+        resaved = self.dir / 'resaved.xlsx'
+        self.resave(applied, resaved, styles=unused_style)
+        code, log = run('diff', self.book, resaved, '--expect', patch)
+        self.assertEqual(code, 0, log)
+
+        # The same re-save, but one cell now points at the new (different) style.
+        restyled = self.dir / 'restyled.xlsx'
+        with zipfile.ZipFile(resaved) as zf:
+            count = int(xlsx_patch.re.search(r'<cellXfs count="(\d+)"', zf.read('xl/styles.xml').decode()).group(1))
+            cell = xlsx_patch.re.search(r'<c r="B2"[^>]*>', zf.read('xl/worksheets/sheet1.xml').decode()).group(0)
+        new_cell = (xlsx_patch.re.sub(r' s="\d+"', '', cell)).replace('<c r="B2"', f'<c r="B2" s="{count}"')
+        self.resave(resaved, restyled, edit=lambda xml: xml.replace(cell, new_cell))
+        code, log = run('diff', self.book, restyled, '--expect', patch)
+        self.assertEqual(code, 1, log)
+        self.assertIn('書式または数式が変わっています：試験結果!B2', log)
+
+        # A lost picture or an added part is always reported.
+        with zipfile.ZipFile(applied) as src, zipfile.ZipFile(self.dir / 'lost.xlsx', 'w') as dst:
+            for item in src.infolist():
+                if item.filename != 'xl/media/image1.png':
+                    dst.writestr(item, src.read(item.filename))
+        code, log = run('diff', self.book, self.dir / 'lost.xlsx', '--expect', patch)
+        self.assertEqual(code, 1, log)
+        self.assertIn('ファイルの削除：xl/media/image1.png', log)
+
+
 class RefTests(unittest.TestCase):
     def test_column_letters_round_trip(self):
         for index, letters in ((1, 'A'), (26, 'Z'), (27, 'AA'), (52, 'AZ'), (703, 'AAA')):

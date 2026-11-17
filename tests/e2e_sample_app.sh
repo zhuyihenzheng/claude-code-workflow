@@ -95,13 +95,20 @@ test -f package.json && test -f cases.mjs
 npm install --no-audit --no-fund > "$OUT/screen-tests-npm.log" 2>&1 || { cat "$OUT/screen-tests-npm.log"; exit 1; }
 export TEST_BROWSER_CHANNEL=chromium TEST_ENGINE=playwright
 npx playwright install chromium > /dev/null
+# What the installed README points at must really be in the installed package.
+test -f node_modules/midscene-poc/.github/instructions/site-tests.instructions.md
+
+step "screen tests: the scaffold command works after a real install"
+npx screen-test-new-site probe --dir scaffold-probe --url http://localhost:8080/ > "$OUT/screen-tests-scaffold.txt"
+grep -q "from 'midscene-poc/core/" scaffold-probe/site.mjs
+node scaffold-probe/run.mjs --engine playwright --build-only > /dev/null
 
 step "screen tests: case definitions and design-document coverage (no browser)"
-npm run -s build | tee "$OUT/screen-tests-build.txt"
+node run.mjs --engine playwright --build-only | tee "$OUT/screen-tests-build.txt"
 grep -q '設計書の 3 項目中 3 項目にケースあり' "$OUT/screen-tests-build.txt"
 
 step "screen tests: run against the app"
-npm test -s | tee "$OUT/screen-tests-run.txt"
+node run.mjs --engine playwright | tee "$OUT/screen-tests-run.txt"
 grep -q '結果：3/3 OK' "$OUT/screen-tests-run.txt"
 test -f 試験仕様書.xlsx && test -f 試験結果.xlsx && test -f 結果一覧.md && test -f out/junit.xml
 # Committed outputs must not contain machine-specific absolute paths.
@@ -112,7 +119,7 @@ cp 結果一覧.md report.html "$OUT/" 2>/dev/null || true
 step "screen tests: a change the design document does not allow is reported as NG (exit 1)"
 sed -i.bak "s/名前を入力してください'\]/お名前を入力してください']/" cases.mjs
 set +e
-npm test -s > "$OUT/screen-tests-ng.txt" 2>&1
+node run.mjs --engine playwright > "$OUT/screen-tests-ng.txt" 2>&1
 code=$?
 set -e
 mv cases.mjs.bak cases.mjs

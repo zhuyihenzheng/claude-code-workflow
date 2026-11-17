@@ -134,8 +134,13 @@ class TemplateTests(unittest.TestCase):
     def test_screen_test_template_pins_the_framework_and_matches_the_fixture(self):
         package = json.loads((PROJECT / 'screen-tests/package.json').read_text(encoding='utf-8'))
         self.assertRegex(package['devDependencies']['midscene-poc'], r'^github:zhuyihenzheng/midscene-poc#[0-9a-f]{40}$')
-        self.assertEqual(package['scripts'], {'build': 'node run.mjs --engine playwright --build-only',
-                                              'test': 'node run.mjs --engine playwright'})
+        # No npm scripts: the permission rules match `node run.mjs …`, and `npm test -- --update-baseline` would slip past them.
+        self.assertNotIn('scripts', package)
+        # One Playwright version for the screen tests and for this repository's own browser tests.
+        workflow = (ROOT / '.github/workflows/validate.yml').read_text(encoding='utf-8')
+        self.assertIn(f"playwright@{package['devDependencies']['playwright']} ", workflow)
+        for name in ('screen-tests/README.md', '.claude/skills/change-flow/SKILL.md'):
+            self.assertNotRegex((PROJECT / name).read_text(encoding='utf-8'), r'npm (run build|test)\b', name)
         fixture = ROOT / 'tests/fixtures/sample-app'
         for name in ('site.mjs', 'cases.mjs', 'run.mjs'):
             text = (fixture / 'screen-tests' / name).read_text(encoding='utf-8')

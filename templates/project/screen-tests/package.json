@@ -2,11 +2,8 @@
   "name": "screen-tests",
   "private": true,
   "description": "画面試験（midscene-poc）。設計書からケースを書き、実ブラウザーで実行して試験仕様書・試験結果・証跡を出力する",
-  "scripts": {
-    "build": "node run.mjs --engine playwright --build-only",
-    "test": "node run.mjs --engine playwright"
-  },
   "devDependencies": {
-    "midscene-poc": "github:zhuyihenzheng/midscene-poc#6a0bf42cbf84986f9837875d8bc2a8845c00b3e6"
+    "midscene-poc": "github:zhuyihenzheng/midscene-poc#4d01913b7cf347118a8c40841606e5480d12b494",
+    "playwright": "1.65.1"
   }
 }

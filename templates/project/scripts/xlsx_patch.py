@@ -22,6 +22,9 @@ apply は、対象シートの XML の該当セルだけを書き換え、他の
 そのままコピーする。保存前に「指示したセルだけが、指示した値になった」ことを確認する。
 diff は 2 つのブックを比べ、変わったセルと、シート以外で変わったファイルを表示する。
 --expect を付けると、変更指示にない差分があれば終了コード 1 を返す（人が Excel で直した結果の確認用）。
+保存のたびに変わる情報（docProps の更新日時、計算チェーン、共有文字列の並び）は比較しない。セルの書式は
+スタイル番号ではなく、フォント・塗りつぶし・罫線・表示形式の定義そのものを比べる。画像・図形・テーマ・
+シート構成が変わった場合は差分として報告する。
 
 制限：数式セル・結合セルの左上以外には書き込まない。書き込む値は文字列。新しく作るセルに書式は付かない。
 終了コード：0 = 成功／差分は指示どおり、1 = 指示にない差分がある、2 = 指示が適用できない・入力が不正。
@@ -97,6 +100,32 @@ def shared_strings(zf):
                  for child in si if child.tag in (f'{{{NS_MAIN}}}t', f'{{{NS_MAIN}}}r')]
         texts.append(''.join(parts))
     return texts
+
+
+def style_table(zf):
+    """Resolved definition of every cell style index, so two workbooks can be compared after a re-save."""
+    if 'xl/styles.xml' not in zf.namelist():
+        return []
+    root = ET.fromstring(zf.read('xl/styles.xml'))
+
+    def children(name):
+        node = root.find(f'{{{NS_MAIN}}}{name}')
+        return [] if node is None else list(node)
+
+    def canon(node):
+        return ET.tostring(node, encoding='unicode') if node is not None else ''
+
+    fonts, fills, borders = children('fonts'), children('fills'), children('borders')
+    formats = {fmt.get('numFmtId'): fmt.get('formatCode') for fmt in children('numFmts')}
+    table = []
+    for xf in children('cellXfs'):
+        def pick(items, key, xf=xf):
+            index = int(xf.get(key, '0'))
+            return canon(items[index]) if index < len(items) else ''
+        number = xf.get('numFmtId', '0')
+        table.append((pick(fonts, 'fontId'), pick(fills, 'fillId'), pick(borders, 'borderId'),
+                      formats.get(number, number), ''.join(canon(child) for child in xf)))
+    return table
 
 
 def read_cells(xml, strings):
@@ -348,17 +377,24 @@ def compare(before, after, expected=None):
             problems.append('シート構成が変わっています')
         sheet_of = {part: name for name, part in parts_b.items()}
         strings_a, strings_b = shared_strings(a), shared_strings(b)
+        styles_a, styles_b = style_table(a), style_table(b)
+
+        def style(table, index):
+            index = int(index or 0)
+            return table[index] if index < len(table) else index
         for name in sorted(set(names_a) | set(names_b)):
             if name not in names_a or name not in names_b:
                 problems.append(f'ファイルの{"追加" if name not in names_a else "削除"}：{name}')
                 continue
             if name not in sheet_of:
-                # Shared strings may be rewritten by Excel on save; what matters is the text each cell shows.
-                if a.read(name) != b.read(name) and name != 'xl/sharedStrings.xml':
+                # Rewritten on every save, or judged through the cells: metadata, calculation chain,
+                # shared strings (cell text) and the style table (resolved per cell below).
+                volatile = name.startswith('docProps/') or name in ('xl/sharedStrings.xml', 'xl/calcChain.xml', 'xl/styles.xml')
+                if a.read(name) != b.read(name) and not volatile:
                     problems.append(f'シート以外のファイルが変わっています：{name}')
                 continue
             xml_a, xml_b = a.read(name).decode('utf-8'), b.read(name).decode('utf-8')
-            if xml_a == xml_b and strings_a == strings_b and name not in (expected or {}):
+            if xml_a == xml_b and strings_a == strings_b and styles_a == styles_b and name not in (expected or {}):
                 continue
             cells_a, cells_b = read_cells(xml_a, strings_a), read_cells(xml_b, strings_b)
             wanted = (expected or {}).get(name, {})
@@ -369,7 +405,7 @@ def compare(before, after, expected=None):
                     changes.append(f'{label}：{old[0]!r} → {new[0]!r}')
                     if expected is not None and wanted.get(ref) != new[0]:
                         problems.append(f'指示にない変更：{label}：{old[0]!r} → {new[0]!r}')
-                elif ref in cells_a and ref in cells_b and old[1:] != new[1:]:
+                elif ref in cells_a and ref in cells_b and (old[2] != new[2] or style(styles_a, old[1]) != style(styles_b, new[1])):
                     problems.append(f'書式または数式が変わっています：{label}')
                 elif (ref in cells_a) != (ref in cells_b) and ref not in wanted:
                     problems.append(f'空のセルの{"追加" if ref in cells_b else "削除"}：{label}')
