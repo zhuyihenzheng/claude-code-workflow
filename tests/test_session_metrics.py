@@ -138,6 +138,17 @@ class SessionMetricsTests(unittest.TestCase):
                 m = metrics.analyse(self.session('c5c5c5c5-2', edit('/p/src/main/webapp/a.jsp'), result(), bash(command), result()))
                 self.assertEqual((m['outcome'], m['browser_checks']), ('unverified', 0))
 
+    def test_images_brought_into_context_are_counted(self):
+        m = metrics.analyse(self.session(
+            'c4c4c4c4-1', tool('Read', file_path='/p/target/htmx-check/ok.PNG'), result(),
+            tool('Read', file_path='/p/src/main/java/A.java'), result(),
+            tool('mcp__chrome-devtools__take_screenshot'), result(), tool('mcp__playwright__browser_take_screenshot'), result(),
+            bash('node scripts/htmx-check.mjs --url x --screenshot target/a.png'), result()))
+        self.assertEqual((m['image_reads'], m['screenshots'], m['browser_checks']), (1, 2, 3))
+        code, out, _ = self.run_cli('--transcripts', self.dir)
+        self.assertEqual(code, 0)
+        self.assertIn('images read back into context: 1  screenshots returned by a tool: 2', out)
+
     def test_friction_and_rule_signals(self):
         m = metrics.analyse(self.session(
             'dddddddd-1', prompt('first'), bash('mvn test'), result(error=True),

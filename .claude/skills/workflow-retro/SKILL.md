@@ -29,6 +29,7 @@ python3 .claude/skills/workflow-retro/scripts/session_metrics.py --project <路�
 | `tool errors` | 工具调用报错的比例 | 文档里的命令、脚本 |
 | `system mvn` | 用了系统 `mvn` 而不是 wrapper | AGENTS.md 的构建规则 |
 | `direct xlsx reads` | 直接读 Excel 设计书 | xlsx deny 规则与 `specs-ai/` |
+| `images read back` / `screenshots` | 读回对话的图片与工具直接返回的截图数。图片留在上下文里，之后每一轮都计入 | 路径规则：合否靠断言，截图留给人看 |
 | `skills` / `subagents` | `spring-endpoint`、`code-reviewer` 有没有被用到 | skill 与子代理的 description |
 
 完成标准：有一份存好的 `.json`，并列出了所有 `unverified` 会话，以及 denials、tool errors、prompts 最高的会话。会话少于 5 个时，在报告开头写明样本不足，后面的结论只算线索。
