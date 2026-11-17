@@ -18,6 +18,8 @@
 | Claude Code 本体 | 運用テレメトリ（Datadog） | 動作状況、エラーレポート | Anthropic API へ直接接続する場合のみ有効 | `DISABLE_TELEMETRY=1`、`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` |
 | GitHub Copilot | GitHub | エディター上のコードとプロンプト | 利用する場合のみ | 契約と組織設定による |
 | Playwright MCP | 指定した URL（通常は `localhost`） | ブラウザー操作 | 有効 | `.mcp.json` から削除する |
+| 画面試験（`screen-tests/`、Playwright エンジン） | `site.mjs` に指定した URL | ブラウザー操作 | **未導入**（`--with-screen-tests` 指定時のみ）。導入後もモデルへの送信はない | — |
+| 画面試験の AI エンジン（`--engine ai` / `midscene`、`--heal`、`--ai-assert`） | `.env` の `MIDSCENE_MODEL_*` に指定したモデル | **画面のスクリーンショット**と操作の指示文 | 使用しない（権限設定で実行のたびに確認） | `.env` にモデルを設定しない |
 | claude.ai コネクタ（Gmail、Google Drive など） | 各サービス | コネクタ経由のデータ | **無効**（`disableClaudeAiConnectors`） | — |
 | Artifact | claude.ai | 公開したページの内容 | **無効**（`enableArtifact: false`） | — |
 | Context7、GitHub MCP、DBHub | 各サービス／開発用 DB | 検索語、リポジトリ操作、SQL | **未導入**（`templates/mcp.optional.json` に分離） | 承認後に個別に追加する |
@@ -30,6 +32,8 @@
 | Claude Code 本体 | `downloads.claude.ai` または npm | 管理者が `requiredMinimumVersion` などで管理する | 常時 |
 | `@playwright/mcp@0.0.85`（Microsoft） | `registry.npmjs.org` | 直接依存のバージョンのみ固定。推移的依存は固定していない | Claude Code の起動時（`npx`） |
 | `playwright`、Chromium | npm、Playwright の配布サーバー | 導入先で固定する | `scripts/htmx-check.mjs` の実行時 |
+| `midscene-poc`（画面試験フレームワーク） | `github.com`（公開リポジトリ。npm の Git 依存として取得） | コミット SHA（`4d01913b7cf3…`）で固定 | `screen-tests/` で `npm install` した場合のみ |
+| `playwright@1.65.1` と Chromium | npm、Playwright の配布サーバー | 直接依存のバージョンを固定 | 同上 |
 | `exstruct==0.9.0`、`excel2md==2.3.0` | PyPI | 直接依存のバージョンのみ固定 | `scripts/xlsx2ai.py` の実行時（Excel 設計書を使用する場合のみ） |
 | 汎用 skill 3 件（MIT、mattpocock/skills 由来） | 本リポジトリに同梱 | 同梱済み。テキストの指示のみ | 利用者が `~/.claude/skills` に導入した場合 |
 
@@ -46,6 +50,8 @@
 | `scripts/xlsx2ai.py` | 手動で実行。ローカルで変換ツールを起動する | なし |
 | `scripts/htmx-check.mjs` | 手動で実行。引数で渡した URL を開く | 指定した URL のみ |
 | `.mcp.json` | Claude Code の起動時に Playwright MCP を起動する（初回は承認の確認が表示される） | 3 章を参照 |
+| `scripts/xlsx_patch.py` | 手動で実行。変更指示（JSON）どおりにブックのセルを書き換える。標準ライブラリのみ | なし |
+| `screen-tests/`（任意） | `node run.mjs` で実行。画面を操作し、試験仕様書・試験結果・`report.html`・`evidence/` を出力する。`report.html` と `evidence/` は画面のスクリーンショットを含むため、`.gitignore` でコミット対象から外している | 2 章を参照 |
 
 インストーラー（`scripts/install.py`）は既存ファイルを上書き・削除せず、既定では計画を表示するだけで書き込まない。
 
@@ -55,7 +61,9 @@
 |---|---|
 | allow | `mvnw` の `compile` / `test` / `verify` の完全一致、`git status` / `diff` / `log`、`gh pr view` / `gh issue view` のみ |
 | deny | `.env*`、ファイル名に `credentials` / `secret` を含むファイル、`.xlsx` / `.xlsm` の読み取り。force push、`rm -rf /...` |
-| ask | マイグレーションディレクトリの編集 |
+| allow（画面試験） | `node run.mjs --engine playwright`（`--build-only`、`--only` を含む） |
+| ask | マイグレーションディレクトリの編集。画面試験の `baseline.json` の編集。スクリーンショットをモデルに送信する AI エンジンと `--heal` / `--ai-assert` |
+| deny（画面試験） | 基準の更新（`--update-baseline` / `--update-visual`、人だけが行う）。スクリーンショットを埋め込んだ `screen-tests/report.html` の読み取り |
 | その他 | `bypassPermissions` モードを無効化。claude.ai コネクタと Artifact を無効化 |
 
 **限界**（公式ドキュメントの記載に基づく）：
@@ -91,6 +99,7 @@ Claude Code 本体が必要とする接続先は公式の一覧（末尾の参�
 | 接続先 | 用途 | 不要にする方法 |
 |---|---|---|
 | `registry.npmjs.org` | Playwright MCP、`playwright` の取得 | 社内ミラーを使用する、または Playwright を使用しない |
+| `github.com`、`codeload.github.com` | 画面試験フレームワーク（`midscene-poc`）の取得 | `npm pack` で作成した `.tgz` を社内のパッケージ置き場に置き、`screen-tests/package.json` の参照先を変更する |
 | Playwright のブラウザー配布サーバー | Chromium の取得（初回のみ） | 社内で配布済みのブラウザーを `PLAYWRIGHT_CHROMIUM_EXECUTABLE` で指定する |
 | `pypi.org`、`files.pythonhosted.org` | Excel 変換ツールの取得 | 社内ミラーを使用する、または Excel 変換を使用しない |
 | Maven のリポジトリ | プロジェクトのビルド（既存） | — |
@@ -103,6 +112,7 @@ Claude Code 本体が必要とする接続先は公式の一覧（末尾の参�
 | セッション記録（`~/.claude/projects/`）にソースコードとコマンド出力が残る | `cleanupPeriodDays` で保持期間を短くする。端末の暗号化と持ち出し制限を適用する |
 | 開発者が個人でプラグイン／mod／MCP を追加する | 6 章の managed settings で制限する |
 | AI が生成したコードの不具合や脆弱性 | 人によるレビュー、CI、ブランチ保護を必須とする。AI のレビューは人のレビューの代わりにしない |
+| 画面試験の証跡（スクリーンショット、Excel の試験結果）に実データが写る | 合成データのテストアカウントだけを使用する。証跡を社外の AI ツールに渡さない。AI エンジンは使用前に承認を得る |
 | ブラウザー操作で本番環境に接続する | Playwright には本番の URL と認証情報を渡さない。サンドボックスのネットワーク許可リストで制限する |
 | 依存パッケージの改ざん | 社内ミラーと脆弱性スキャンを使用する。バージョンを上げる際は CI の結果を確認する |
 
@@ -112,6 +122,7 @@ Claude Code 本体が必要とする接続先は公式の一覧（末尾の参�
 - managed settings の例を実際に配布した場合の動作。本リポジトリの CI では JSON としての妥当性のみを確認している。
 - プロジェクトの `settings.json` に追加した無効化の設定（`bypassPermissions`、claude.ai コネクタ、Artifact）が、実際のセッションで期待どおりに動作すること。各キーの説明は公式の設定リファレンスに基づいており、セッションでの動作は確認していない。
 - 多モジュール構成、Spring Security を使用する業務プロジェクトでの動作。
+- 画面試験を実際の業務プロジェクトで実行した場合の動作（本リポジトリでは CI のサンプルアプリでのみ確認）。
 
 ## 参照先
 

@@ -12,6 +12,7 @@
 | `rules/*.md` | `paths:` に一致するファイルを扱うときだけ読み込まれるルール | 編集後に `python3 scripts/sync_rules.py` を実行し、Copilot 用の `.github/instructions/` を再生成する |
 | `agents/code-reviewer.md` | 読み取り専用のレビュー用サブエージェント | Bash を持たないため、呼び出し側が diff を渡す |
 | `skills/spring-endpoint/` | エンドポイント／画面フラグメント追加の標準手順 | TODO の参考パスをプロジェクトの実例に置き換える |
+| `skills/change-flow/` | 改修の標準手順（設計書 → 実装 → 単体テスト → 画面試験 → 試験書） | 画面試験を導入していない場合は、該当ステップを `htmx-check.mjs` で代替する |
 | `hooks/verify-stop.py` | Stop hook の参考サンプル（**未登録**） | 下記「Hooks」を参照 |
 | `../.mcp.json` | MCP サーバー（Playwright のみ。ローカルプロセス） | リモートの MCP サービスを追加する場合は、事前に社内の承認を得る |
 
@@ -22,6 +23,12 @@
 - deny／ask は Claude Code の組み込みツールに対する制御であり、プロセスの隔離ではない。任意のスクリプト、MCP、hooks の権限は別途管理する（OS のサンドボックス、最小権限の認証情報）。
 - `bypassPermissions` モード、claude.ai コネクタ、Artifact の公開は無効としている。有効にする場合は社内の承認を得る。外部への通信の制限は、管理者が配布するサンドボックスの許可リストで行う。
 - マイグレーションのディレクトリは deny ではなく ask としている。新規追加は確認のうえで行い、マージ済みファイルの不変性はマイグレーションツールと CI で検証する。
+
+## 画面試験と Excel の修正
+
+- `node run.mjs --engine playwright`（`--build-only`、`--only <スイート>` を含む）は許可している。`--engine ai` / `--engine midscene` / `--heal` / `--ai-assert` は画面のスクリーンショットをモデルに送信するため ask、`--update-baseline` / `--update-visual` は人だけが行うため deny としている。
+- `screen-tests/baseline.json` の編集は ask、スクリーンショットを埋め込んだ `screen-tests/report.html` の Read は deny としている。AI は `結果一覧.md` を読む。
+- Excel の修正は `scripts/xlsx_patch.py` の変更指示で行う。実行のたびに確認が入る（allow に追加していない）。
 
 ## Hooks
 

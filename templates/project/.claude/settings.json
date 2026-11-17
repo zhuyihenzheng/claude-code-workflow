@@ -18,6 +18,9 @@
       "PowerShell(.\\mvnw.cmd -B -q compile)",
       "PowerShell(.\\mvnw.cmd test)",
       "PowerShell(.\\mvnw.cmd verify)",
+      "Bash(node run.mjs --engine playwright)",
+      "Bash(node run.mjs --engine playwright --build-only)",
+      "Bash(node run.mjs --engine playwright --only *)",
       "Bash(git status)",
       "Bash(git diff *)",
       "Bash(git log *)",
@@ -41,10 +44,18 @@
       "Bash(git push * --force)",
       "Bash(git push * --force *)",
       "Bash(git push * -f)",
-      "Bash(git push * -f *)"
+      "Bash(git push * -f *)",
+      "Read(/screen-tests/report.html)",
+      "Bash(node *run.mjs *--update-baseline*)",
+      "Bash(node *run.mjs *--update-visual*)"
     ],
     "ask": [
-      "Edit(/src/main/resources/db/migration/**)"
+      "Edit(/src/main/resources/db/migration/**)",
+      "Edit(/screen-tests/baseline.json)",
+      "Bash(node *run.mjs *--engine ai*)",
+      "Bash(node *run.mjs *--engine midscene*)",
+      "Bash(node *run.mjs *--heal*)",
+      "Bash(node *run.mjs *--ai-assert*)"
     ],
     "disableBypassPermissionsMode": "disable"
   },

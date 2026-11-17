@@ -43,7 +43,7 @@ class InstallTests(unittest.TestCase):
         self.assertFalse((self.target / '.claude').exists())
 
     def test_apply_into_empty_project_copies_every_template_byte_for_byte(self):
-        run('project', self.target, '--apply', '--with-workflows')
+        run('project', self.target, '--apply', '--with-workflows', '--with-screen-tests')
         for rel, source in install.template_files(PROJECT):
             with self.subTest(rel=rel):
                 self.assertEqual((self.target / rel).read_bytes(), source.read_bytes())
@@ -56,7 +56,7 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertFalse(workflows.exists())
         self.assertRegex(out, r'optional\s+\.github/workflows/claude\.yml\s+\(.*--with-workflows')
-        self.assertIn('optional: 3', out)
+        self.assertEqual(len([line for line in out.splitlines() if line.startswith('optional') and '--with-workflows' in line]), 3)
         self.assertEqual({k for rel, k in self.kinds().items() if rel.startswith('.github/workflows/')}, {'optional'})
         self.assertEqual(set(self.kinds().values()), {'skip', 'optional'})
         run('project', self.target, '--apply', '--with-workflows')
@@ -71,6 +71,18 @@ class InstallTests(unittest.TestCase):
         result = subprocess.run([sys.executable, 'scripts/sync_rules.py', '--check'],
                                 cwd=self.target, capture_output=True, text=True, encoding='utf-8')
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_screen_tests_are_installed_only_on_request(self):
+        code, out, _ = run('project', self.target, '--apply')
+        self.assertEqual(code, 0)
+        self.assertFalse((self.target / 'screen-tests').exists())
+        self.assertRegex(out, r'optional\s+screen-tests/package\.json\s+\(.*--with-screen-tests')
+        run('project', self.target, '--apply', '--with-screen-tests')
+        package = json.loads((self.target / 'screen-tests/package.json').read_text(encoding='utf-8'))
+        # The framework is pinned to a full commit SHA, never to a branch or a version range.
+        self.assertRegex(package['devDependencies']['midscene-poc'], r'^github:zhuyihenzheng/midscene-poc#[0-9a-f]{40}$')
+        self.assertTrue((self.target / 'screen-tests/.gitignore').is_file())
+        self.assertFalse((self.target / '.github/workflows').exists(), 'the two options are independent')
 
     def test_existing_settings_are_merged_not_overwritten(self):
         settings = self.target / '.claude/settings.json'

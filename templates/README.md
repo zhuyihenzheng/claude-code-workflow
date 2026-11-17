@@ -33,6 +33,7 @@
    | `merge` | `.gitattributes` | 缺失行追加到末尾，使 `mvnw` 等具体规则盖过 `* text=auto` 这类泛规则；同模式被覆盖时提示 |
    | `conflict` | 其余内容不同的文件，以及目标文件本身是符号链接（含悬空链接）或目录 | **不改动**，用 `--diff` 对比后手动合并。路径中间的目录链接（如共享的 `.claude/`）会照常跟随并写入其指向的目录 |
    | `optional` | `.github/workflows/` 下目标尚不存在的文件 | 默认不安装，见下文 [GitHub workflows](#github-workflows) |
+   | `optional` | `screen-tests/` 下目标尚不存在的文件 | 默认不安装；加 `--with-screen-tests` 安装，见 [14 · 改修流程与画面试验](../docs/14-改修流程与画面试验.md) |
    | `error` | 写入失败（例如路径上有同名文件） | 其余文件照常写入，退出码 1 |
 
    已有的 `Bash(./mvnw *)` 等宽泛规则或与模板 deny/ask 冲突的 allow 会在输出中提示。脚本不删除任何文件，合并后仍须 `git diff` 审查再提交。不用脚本时按相同规则逐项手动合并，不要整目录覆盖。
@@ -72,6 +73,14 @@ node scripts/htmx-check.mjs --storage-state target/htmx-check/state.json --clear
 ## Excel 设计书转换脚本
 
 [`project/scripts/xlsx2ai.py`](project/scripts/xlsx2ai.py) 把 `specs/` 下的 .xlsx/.xlsm 转成 `specs-ai/`：按 sheet 拆分的 ExStruct light JSON、图形流程图的 Mermaid（excel2md）以及目次。只重转 SHA-256 变化的文件，删除原本已不存在的输出；`--check` 供 CI 检查过期。需 Python 3.11+ 与 `pip install "exstruct==0.9.0" "excel2md==2.3.0"`。模板 settings 同时 deny `Read(/**/*.xlsx)` / `Read(/**/*.xlsm)`，避免 AI 直接读原本。实测数据、人工处理项与 MCP 定位见 [11 · Excel 设计书](../docs/11-Excel设计书.md)。
+
+## 画面试验与 Excel 修改
+
+- `--with-screen-tests` 安装 [`project/screen-tests/`](project/screen-tests/README.md)：一个固定了 [midscene-poc](https://github.com/zhuyihenzheng/midscene-poc) 提交 SHA 的 Node 项目。它不随默认安装，因为需要 Node、浏览器和从 GitHub 取包。
+- [`project/scripts/xlsx_patch.py`](project/scripts/xlsx_patch.py) 按变更指示（JSON）改 Excel，只用标准库。`apply` 写入前自检，`diff --expect` 核对人的修改。
+- skill [`change-flow`](project/.claude/skills/change-flow/SKILL.md) 把设计书、实现、单体测试、画面试验、试验书串成一条流程。
+
+背景、分工与验证范围见 [14 · 改修流程与画面试验](../docs/14-改修流程与画面试验.md)。
 
 ## 规则维护与 Copilot 兼容范围
 

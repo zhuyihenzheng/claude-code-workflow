@@ -127,6 +127,28 @@ class SessionMetricsTests(unittest.TestCase):
         self.assertEqual((m['outcome'], m['maven_tests'], m['prompts']), ('verified', 1, 0))
         self.assertIn(('agent-1:2', 'maven-test'), m['events'])
 
+    def test_screen_test_runs_count_as_browser_checks(self):
+        for command in ('node run.mjs --engine playwright', 'cd screen-tests && node run.mjs --engine playwright --only 01-order',
+                        'node sites/app/tests/run.mjs --engine ai', 'cd screen-tests && npm test', 'cd /p/screen-tests; npm run test'):
+            with self.subTest(command=command):
+                m = metrics.analyse(self.session('c5c5c5c5-1', edit('/p/src/main/webapp/a.jsp'), result(), bash(command), result()))
+                self.assertEqual((m['outcome'], m['browser_checks']), ('verified', 1))
+        for command in ('node run.mjs --engine playwright --build-only', 'npm test', 'node run.mjs --help'):
+            with self.subTest(command=command):
+                m = metrics.analyse(self.session('c5c5c5c5-2', edit('/p/src/main/webapp/a.jsp'), result(), bash(command), result()))
+                self.assertEqual((m['outcome'], m['browser_checks']), ('unverified', 0))
+
+    def test_images_brought_into_context_are_counted(self):
+        m = metrics.analyse(self.session(
+            'c4c4c4c4-1', tool('Read', file_path='/p/target/htmx-check/ok.PNG'), result(),
+            tool('Read', file_path='/p/src/main/java/A.java'), result(),
+            tool('mcp__chrome-devtools__take_screenshot'), result(), tool('mcp__playwright__browser_take_screenshot'), result(),
+            bash('node scripts/htmx-check.mjs --url x --screenshot target/a.png'), result()))
+        self.assertEqual((m['image_reads'], m['screenshots'], m['browser_checks']), (1, 2, 3))
+        code, out, _ = self.run_cli('--transcripts', self.dir)
+        self.assertEqual(code, 0)
+        self.assertIn('images read back into context: 1  screenshots returned by a tool: 2', out)
+
     def test_friction_and_rule_signals(self):
         m = metrics.analyse(self.session(
             'dddddddd-1', prompt('first'), bash('mvn test'), result(error=True),

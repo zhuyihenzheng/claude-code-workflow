@@ -14,6 +14,8 @@ Existing files are never overwritten:
 * any other differing file -> conflict (left untouched; --diff shows the difference)
 * symlinked destination file -> conflict (never written through; a symlinked
   parent directory such as a shared .claude/ is followed)
+* screen-tests/*           -> optional (only with --with-screen-tests: a Node
+  project that installs the screen-test framework from GitHub)
 * .github/workflows/*      -> optional (only with --with-workflows: they run
   with repository permissions and need secrets)
 
@@ -24,7 +26,7 @@ instructions and tracked secrets. It only reads.
 Exit code: 0 on success, 1 if a file could not be written or ``doctor`` found a failure.
 
 Usage:
-    python3 scripts/install.py project /path/to/project [--apply] [--diff] [--with-workflows]
+    python3 scripts/install.py project /path/to/project [--apply] [--diff] [--with-workflows] [--with-screen-tests]
     python3 scripts/install.py user [--claude-dir ~/.claude] [--apply] [--diff]
     python3 scripts/install.py doctor /path/to/project
 """
@@ -46,6 +48,8 @@ JSON_MERGE = {'.claude/settings.json', '.mcp.json'}
 LINE_MERGE = {'.gitignore', '.gitattributes'}
 # Workflows act on the repository as soon as they are committed, so they are opt-in.
 WORKFLOWS = '.github/workflows/'
+# A Node project of its own; projects that do not run screen tests should not get it.
+SCREEN_TESTS = 'screen-tests/'
 KINDS = ('create', 'merge', 'skip', 'conflict', 'optional', 'error')
 PERMISSION_LISTS = ('allow', 'deny', 'ask')
 # Top-level switches the company edition turns off; added when absent, never overwritten.
@@ -188,12 +192,14 @@ def plan_file(rel, source, dest, merge_kind=None):
     return Action('conflict', rel, source, dest, note='differs from template; compare and merge manually')
 
 
-def plan_project(target, with_workflows=False):
+def plan_project(target, with_workflows=False, with_screen_tests=False):
     actions = []
     for rel, source in template_files(PROJECT_TEMPLATES):
         dest = target / rel
-        if rel.startswith(WORKFLOWS) and not with_workflows and not os.path.lexists(dest):
-            actions.append(Action('optional', rel, source, dest, note='not installed; pass --with-workflows'))
+        flag = ('--with-workflows' if rel.startswith(WORKFLOWS) and not with_workflows
+                else '--with-screen-tests' if rel.startswith(SCREEN_TESTS) and not with_screen_tests else None)
+        if flag and not os.path.lexists(dest):
+            actions.append(Action('optional', rel, source, dest, note=f'not installed; pass {flag}'))
             continue
         kind = 'json' if rel in JSON_MERGE else 'lines' if rel in LINE_MERGE else None
         actions.append(plan_file(rel, source, dest, kind))
@@ -357,6 +363,8 @@ def main(argv=None):
     project.add_argument('target', type=Path)
     user = sub.add_parser('user', help='install templates/user/skills into ~/.claude/skills')
     user.add_argument('--claude-dir', type=Path, default=Path.home() / '.claude')
+    project.add_argument('--with-screen-tests', action='store_true',
+                         help='also install screen-tests/ (a Node project that pins the screen-test framework)')
     project.add_argument('--with-workflows', action='store_true',
                          help='also install .github/workflows/ (they need secrets and repository permissions)')
     check = sub.add_parser('doctor', help='check a project that already has the templates (read-only)')
@@ -387,7 +395,7 @@ def main(argv=None):
             print('warning: no pom.xml in target; templates assume a Maven project', file=sys.stderr)
         if not ((target / 'mvnw').is_file() or (target / 'mvnw.cmd').is_file()):
             print('warning: no Maven Wrapper (mvnw / mvnw.cmd) in target', file=sys.stderr)
-        actions = plan_project(target, args.with_workflows)
+        actions = plan_project(target, args.with_workflows, args.with_screen_tests)
     else:
         actions = plan_user(args.claude_dir.expanduser().resolve())
 

@@ -35,8 +35,13 @@ import sys
 MAVEN = re.compile(r'(?:^|[\s;&|(])((?:[\w.\\/-]*[\\/])?mvnw(?:\.cmd)?|mvn)\s+([^;&|]*)')
 TEST_GOALS = {'test', 'verify', 'package', 'install', 'integration-test'}
 BROWSER_TOOLS = ('mcp__playwright__', 'mcp__chrome-devtools__', 'mcp__claude-in-chrome__')
-BROWSER_COMMANDS = r'htmx-check\.mjs|\bplaywright\s+test\b'
+# htmx-check, Playwright Test, and the screen-test runner (run.mjs --engine …, or npm test inside screen-tests/).
+# A --build-only run opens no browser, so it is not a check.
+BROWSER_COMMANDS = (r'htmx-check\.mjs|\bplaywright\s+test\b'
+                    r'|\brun\.mjs\b(?![^\n;&|]*--build-only)[^\n;&|]*--engine\b'
+                    r'|screen-tests\b[^\n]*\bnpm\s+(?:run\s+)?test\b')
 SKIP_TESTS = ('-DskipTests', '-Dmaven.test.skip')
+IMAGE_SUFFIXES = ('.png', '.jpg', '.jpeg', '.gif', '.webp')
 EDIT_TOOLS = {'Edit', 'Write', 'MultiEdit', 'NotebookEdit'}
 SYSTEM_TEXT = ('<', '[Request interrupted', 'Caveat:')
 SUBCOMMAND_TOOLS = {'git', 'gh', 'npm', 'npx', 'pnpm', 'yarn', 'docker', 'kubectl', 'pip', 'uv', 'brew'}
@@ -131,7 +136,7 @@ def analyse(path):
     m = {'session': path.stem[:8], 'prompts': 0, 'interrupts': 0, 'tool_calls': 0, 'tool_errors': 0,
          'denials': Counter(), 'edits': Counter(), 'maven_tests': 0, 'maven_test_failures': 0, 'maven_compiles': 0,
          'system_mvn': 0, 'browser_checks': 0, 'browser_check_failures': 0, 'commits': 0, 'compactions': 0,
-         'skills': Counter(), 'agents': Counter(), 'spec_xlsx_reads': 0, 'commands': Counter(), 'cost_usd': None,
+         'skills': Counter(), 'agents': Counter(), 'spec_xlsx_reads': 0, 'image_reads': 0, 'screenshots': 0, 'commands': Counter(), 'cost_usd': None,
          'file': str(path), 'events': []}
     step = 0
     last = {'code': -1, 'view': -1, 'maven-test': -1, 'browser-check': -1}
@@ -198,6 +203,10 @@ def analyse(path):
             elif name == 'Read' and str(args.get('file_path', '')).lower().endswith(('.xlsx', '.xlsm')):
                 m['spec_xlsx_reads'] += 1
                 event(source, line_no, 'xlsx-read')
+            elif name == 'Read' and str(args.get('file_path', '')).lower().endswith(IMAGE_SUFFIXES):
+                # An image read back into the conversation stays in context for the rest of the session.
+                m['image_reads'] += 1
+                event(source, line_no, 'image-read')
             elif name == 'Skill':
                 m['skills'][label(args.get('skill'))] += 1
                 event(source, line_no, 'skill:' + label(args.get('skill')))
@@ -229,6 +238,9 @@ def analyse(path):
                     elif TEST_GOALS.intersection(words) or 'compile' in words:
                         m['maven_compiles'] += 1
                         event(source, line_no, 'maven-compile')
+            if 'screenshot' in name.lower():
+                m['screenshots'] += 1
+                event(source, line_no, 'screenshot')
             for check in sorted(checks):
                 m['maven_tests' if check == 'maven-test' else 'browser_checks'] += 1
                 event(source, line_no, check)
@@ -292,7 +304,7 @@ def summarise(sessions):
     edited = [s for s in sessions if s['outcome'] != 'no-code-edit']
     total = Counter()
     for key in ('prompts', 'interrupts', 'tool_calls', 'tool_errors', 'system_mvn', 'spec_xlsx_reads', 'commits', 'compactions',
-                'maven_test_failures', 'browser_check_failures'):
+                'maven_test_failures', 'browser_check_failures', 'image_reads', 'screenshots'):
         total[key] = sum(s[key] for s in sessions)
     merged = {key: sum((s[key] for s in sessions), Counter()) for key in ('denials', 'skills', 'agents', 'commands', 'edits')}
 
@@ -331,6 +343,8 @@ def render(summary, sessions, out):
     print(f"denials: {summary['denials'] or 'none'}", file=out)
     print(f"system mvn instead of the wrapper: {summary['totals']['system_mvn']}"
           f"  direct xlsx reads: {summary['totals']['spec_xlsx_reads']}", file=out)
+    print(f"images read back into context: {summary['totals']['image_reads']}"
+          f"  screenshots returned by a tool: {summary['totals']['screenshots']}", file=out)
     print(f"skills: {summary['skills'] or 'none'}  subagents: {summary['agents'] or 'none'}", file=out)
     print('top commands: ' + ', '.join(f'{head} ×{count}' for head, count in summary['top_commands']), file=out)
     print('\n| session | outcome | prompts | edits b/v/t | mvn test | browser | errors | denials | interrupts |', file=out)
