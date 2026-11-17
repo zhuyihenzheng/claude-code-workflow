@@ -32,7 +32,7 @@
 | Claude Code 本体 | `downloads.claude.ai` または npm | 管理者が `requiredMinimumVersion` などで管理する | 常時 |
 | `@playwright/mcp@0.0.85`（Microsoft） | `registry.npmjs.org` | 直接依存のバージョンのみ固定。推移的依存は固定していない | Claude Code の起動時（`npx`） |
 | `playwright`、Chromium | npm、Playwright の配布サーバー | 導入先で固定する | `scripts/htmx-check.mjs` の実行時 |
-| `midscene-poc`（画面試験フレームワーク） | `github.com`（公開リポジトリ。npm の Git 依存として取得） | コミット SHA（`4d01913b7cf3…`）で固定 | `screen-tests/` で `npm install` した場合のみ |
+| `midscene-poc`（画面試験フレームワーク） | `github.com`（公開リポジトリ。npm の Git 依存として取得） | コミット SHA（`bac60a7db489…`）で固定 | `screen-tests/` で `npm install` した場合のみ |
 | `playwright@1.65.1` と Chromium | npm、Playwright の配布サーバー | 直接依存のバージョンを固定 | 同上 |
 | `exstruct==0.9.0`、`excel2md==2.3.0` | PyPI | 直接依存のバージョンのみ固定 | `scripts/xlsx2ai.py` の実行時（Excel 設計書を使用する場合のみ） |
 | 汎用 skill 3 件（MIT、mattpocock/skills 由来） | 本リポジトリに同梱 | 同梱済み。テキストの指示のみ | 利用者が `~/.claude/skills` に導入した場合 |
