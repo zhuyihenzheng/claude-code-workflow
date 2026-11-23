@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 # End-to-end check of the templates against a real Spring Boot + JSP + HTMX app.
 # Runs in CI (needs JDK 21, Maven, Node with playwright + htmx.org installed in the repo root).
-# Steps: install templates -> ./mvnw verify -> Stop hook (pass + real compile failure)
-#        -> start the app -> htmx-check.mjs (success, 422 re-render, escaping)
+# Steps: install templates -> guard (pass + real past mistakes) -> ./mvnw verify (JUnit, ArchUnit, PMD on JSP)
+#        -> what guard cannot see: ArchUnit and PMD catch it -> Stop hook (pass + real compile failure)
+#        -> start the app -> htmx-check.mjs (success, 422 re-render, escaping) -> feature map recipes
 #        -> screen tests (framework installed from GitHub at the pinned commit) -> xlsx_patch on the generated results.
 set -euo pipefail
+# Rule messages are Japanese; Maven and the forked test JVM print them in the locale's encoding.
+export LC_ALL=C.UTF-8 LANG=C.UTF-8
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 WORK="${RUNNER_TEMP:-$(mktemp -d)}/sample-app"
@@ -29,14 +32,68 @@ mvn -B -q -N wrapper:wrapper -Dmaven=3.9.9
 test -x ./mvnw
 
 step "Install templates (dry run, then apply)"
-python "$REPO/scripts/install.py" project "$WORK" --with-screen-tests
-python "$REPO/scripts/install.py" project "$WORK" --with-screen-tests --apply
-python "$REPO/scripts/install.py" project "$WORK" --with-screen-tests | tee "$OUT/install-second-run.txt"
+python "$REPO/scripts/install.py" project "$WORK" --with-screen-tests --with-archunit
+python "$REPO/scripts/install.py" project "$WORK" --with-screen-tests --with-archunit --apply
+python "$REPO/scripts/install.py" project "$WORK" --with-screen-tests --with-archunit | tee "$OUT/install-second-run.txt"
 grep -q 'create: 0, merge: 0' "$OUT/install-second-run.txt"
 python scripts/sync_rules.py --check
 
-step "./mvnw verify (JUnit + MockMvc)"
+step "guard: the sample app passes the template rules"
+python scripts/guard.py | tee "$OUT/guard-pass.txt"
+grep -q 'guard: OK' "$OUT/guard-pass.txt"
+
+step "guard: a mapper injected into a controller and a scriptlet fail with their fix (exit 1)"
+CONTROLLER=src/main/java/com/example/demo/OrderController.java
+RESULT_JSP=src/main/webapp/WEB-INF/jsp/fragments/order-result.jsp
+cp "$CONTROLLER" "$OUT/OrderController.java.orig" && cp "$RESULT_JSP" "$OUT/order-result.jsp.orig"
+sed -i -e 's/^import jakarta.servlet.http.HttpServletResponse;/import com.example.demo.mapper.OrderMapper;\n&/' \
+  -e 's/^public class OrderController {/&\n    @Autowired\n    private OrderMapper orderMapper;/' "$CONTROLLER"
+printf '%s\n' '<p><%= request.getParameter("name") %></p>' >> "$RESULT_JSP"
+set +e
+python scripts/guard.py > "$OUT/guard-fail.txt"
+code=$?
+set -e
+cat "$OUT/guard-fail.txt"
+test "$code" -eq 1
+grep -q "^$CONTROLLER:3: \[controller-no-persistence\] " "$OUT/guard-fail.txt"
+grep -q "^$CONTROLLER:15: \[java-no-field-injection\] .*コンストラクタの引数で受け取る" "$OUT/guard-fail.txt"
+grep -q "^$RESULT_JSP:[0-9]*: \[jsp-no-scriptlet\] " "$OUT/guard-fail.txt"
+cp "$OUT/OrderController.java.orig" "$CONTROLLER" && cp "$OUT/order-result.jsp.orig" "$RESULT_JSP"
+python scripts/guard.py > /dev/null
+
+step "./mvnw verify (JUnit + MockMvc, ArchUnit, PMD on JSP)"
 ./mvnw -B -q verify
+grep -q 'tests="3"' target/surefire-reports/TEST-ArchitectureTest.xml
+
+step "ArchUnit: a same-package repository used by the controller passes guard but fails the layer rule"
+cp "$CONTROLLER" "$OUT/OrderController.java.orig"
+printf '%s\n' 'package com.example.demo;' '' 'class OrderRepository {' '    void save(String name) {' '    }' '}' \
+  > src/main/java/com/example/demo/OrderRepository.java
+sed -i -e 's/^public class OrderController {/&\n\n    private final OrderRepository repository = new OrderRepository();/' \
+  -e 's/^        return "fragments\/order-result";/        repository.save(name);\n&/' "$CONTROLLER"
+python scripts/guard.py > "$OUT/guard-same-package.txt"
+set +e
+./mvnw -B test -Dtest=ArchitectureTest > "$OUT/archunit-fail.txt" 2>&1
+code=$?
+set -e
+test "$code" -ne 0
+grep -q 'controllers_do_not_use_persistence' "$OUT/archunit-fail.txt"
+grep -q 'Service のメソッドとして追加し' "$OUT/archunit-fail.txt"
+grep -q 'OrderRepository.save' "$OUT/archunit-fail.txt"
+rm src/main/java/com/example/demo/OrderRepository.java
+cp "$OUT/OrderController.java.orig" "$CONTROLLER"
+
+step "PMD: unescaped EL in a JSP fails verify with the fix"
+printf '%s\n' '<p class="echo">${name}</p>' >> "$RESULT_JSP"
+set +e
+./mvnw -B pmd:check@jsp-xss > "$OUT/pmd-fail.txt" 2>&1
+code=$?
+set -e
+test "$code" -ne 0
+grep -q 'PMD Failure: order-result.jsp:4 Rule:NoUnsanitizedJSPExpression' "$OUT/pmd-fail.txt"
+grep -q 'fn:escapeXml' "$OUT/pmd-fail.txt"
+cp "$OUT/order-result.jsp.orig" "$RESULT_JSP"
+./mvnw -B -q pmd:check@jsp-xss
 
 step "Stop hook: passing compile is silent"
 hook_out="$(printf '%s\n' '{"stop_hook_active":false}' | python .claude/hooks/verify-stop.py)"
@@ -88,6 +145,16 @@ check --click '#submit' --contains '登録しました' --timeout 3000
 code=$?
 set -e
 test "$code" -eq 1
+
+step "feature map: every recipe in docs/feature-map runs and leaves its evidence"
+grep -ho '`node scripts/htmx-check.mjs [^`]*`' docs/feature-map/*.md | tr -d '`' > "$OUT/feature-map-recipes.txt"
+test "$(wc -l < "$OUT/feature-map-recipes.txt")" -ge 3
+while IFS= read -r recipe; do
+  printf '+ %s\n' "$recipe"
+  eval "$recipe"
+done < "$OUT/feature-map-recipes.txt"
+test -f target/evidence/S01/S01-1.png && test -f target/evidence/S01/S01-2.png && test -f target/evidence/S01/S01-3.png
+cp -R target/evidence "$OUT/feature-map-evidence"
 
 step "screen tests: install the pinned framework"
 cd "$WORK/screen-tests"

@@ -18,15 +18,18 @@ Existing files are never overwritten:
   project that installs the screen-test framework from GitHub)
 * .github/workflows/*      -> optional (only with --with-workflows: they run
   with repository permissions and need secrets)
+* src/test/java/*          -> optional (only with --with-archunit: the ArchUnit test
+  compiles only after the dependency in config/quality/pom-snippet.xml is added)
 
 ``doctor`` checks a project that already has the templates: placeholders left in
 AGENTS.md, the CLAUDE.md import, permission rules, MCP servers, generated Copilot
-instructions and tracked secrets. It only reads.
+instructions, the guard checks and the rules AGENTS.md says guard, ArchUnit and
+PMD enforce, the feature map, and tracked secrets. It only reads.
 
 Exit code: 0 on success, 1 if a file could not be written or ``doctor`` found a failure.
 
 Usage:
-    python3 scripts/install.py project /path/to/project [--apply] [--diff] [--with-workflows] [--with-screen-tests]
+    python3 scripts/install.py project /path/to/project [--apply] [--diff] [--with-workflows] [--with-screen-tests] [--with-archunit]
     python3 scripts/install.py user [--claude-dir ~/.claude] [--apply] [--diff]
     python3 scripts/install.py doctor /path/to/project
 """
@@ -50,6 +53,9 @@ LINE_MERGE = {'.gitignore', '.gitattributes'}
 WORKFLOWS = '.github/workflows/'
 # A Node project of its own; projects that do not run screen tests should not get it.
 SCREEN_TESTS = 'screen-tests/'
+# Compiles only once the project's pom.xml has the ArchUnit dependency.
+ARCHUNIT = 'src/test/java/'
+POM_SNIPPET = 'config/quality/pom-snippet.xml'
 KINDS = ('create', 'merge', 'skip', 'conflict', 'optional', 'error')
 PERMISSION_LISTS = ('allow', 'deny', 'ask')
 IGNORED_PARTS = {'__pycache__'}
@@ -179,17 +185,21 @@ def plan_file(rel, source, dest, merge_kind=None):
     return Action('conflict', rel, source, dest, note='differs from template; compare and merge manually')
 
 
-def plan_project(target, with_workflows=False, with_screen_tests=False):
+def plan_project(target, with_workflows=False, with_screen_tests=False, with_archunit=False):
     actions = []
     for rel, source in template_files(PROJECT_TEMPLATES):
         dest = target / rel
         flag = ('--with-workflows' if rel.startswith(WORKFLOWS) and not with_workflows
-                else '--with-screen-tests' if rel.startswith(SCREEN_TESTS) and not with_screen_tests else None)
+                else '--with-screen-tests' if rel.startswith(SCREEN_TESTS) and not with_screen_tests
+                else '--with-archunit' if rel.startswith(ARCHUNIT) and not with_archunit else None)
         if flag and not os.path.lexists(dest):
             actions.append(Action('optional', rel, source, dest, note=f'not installed; pass {flag}'))
             continue
         kind = 'json' if rel in JSON_MERGE else 'lines' if rel in LINE_MERGE else None
-        actions.append(plan_file(rel, source, dest, kind))
+        action = plan_file(rel, source, dest, kind)
+        if rel.startswith(ARCHUNIT) and action.kind == 'create' and 'archunit' not in all_poms(target):
+            action.note = f'add the archunit-junit5 dependency from {POM_SNIPPET} to pom.xml, or test compilation fails'
+        actions.append(action)
     claude_md = next(a for a in actions if a.rel == 'CLAUDE.md')
     if claude_md.kind == 'conflict' and claude_md.dest.is_file() and not claude_md.dest.is_symlink() \
             and '@AGENTS.md' not in claude_md.dest.read_text(encoding='utf-8', errors='replace'):
@@ -333,6 +343,9 @@ def doctor(target):
         add('ok' if result.returncode == 0 else 'fail', '.github/instructions/ matches .claude/rules/' if result.returncode == 0
             else '.github/instructions/ is out of sync with .claude/rules/: run scripts/sync_rules.py')
 
+    doctor_guard(target, agents, add)
+    doctor_structure(target, agents, add)
+
     git = shutil.which('git')
     if git and (target / '.git').exists():
         tracked = subprocess.run([git, '-C', str(target), 'ls-files', '--', '.claude/settings.local.json', 'CLAUDE.local.md',
@@ -341,6 +354,86 @@ def doctor(target):
         add('fail' if tracked else 'ok', f'tracked by git but must stay local: {tracked}' if tracked
             else 'no local settings or .env files are tracked by git')
     return findings
+
+
+def doctor_guard(target, agents, add):
+    guard = target / 'scripts/guard.py'
+    rules_path = target / 'config/guard/rules.json'
+    if not guard.is_file() or not rules_path.is_file():
+        add('warn', 'scripts/guard.py or config/guard/rules.json is missing: corrections stay prose that nothing enforces')
+        return
+    result = subprocess.run([sys.executable, str(guard), '--root', str(target)], capture_output=True, text=True,
+                            encoding='utf-8', errors='replace', env={**os.environ, 'PYTHONIOENCODING': 'utf-8'})
+    last = (result.stdout.strip().splitlines() or result.stderr.strip().splitlines() or [''])[-1]
+    if result.returncode == 0:
+        add('ok', 'guard passes: ' + last)
+    elif result.returncode == 1:
+        hint = ('; a person accepts existing violations with scripts/guard.py --init-baseline'
+                if not (target / 'config/guard/baseline.json').is_file() else '')
+        add('fail', 'guard reports violations (run python3 scripts/guard.py)' + hint)
+    else:
+        add('fail', 'guard could not run its rules: ' + (result.stderr.strip() or last))
+    try:
+        ids = {rule.get('id') for rule in json.loads(rules_path.read_text(encoding='utf-8')).get('rules', [])}
+    except (ValueError, AttributeError):
+        return
+    tagged = set()
+    for tag in re.findall(r'〔guard:([^〕]*)〕', agents or ''):
+        tagged.update(part.strip() for part in tag.split(',') if re.fullmatch(r'[a-z0-9]+(?:-[a-z0-9]+)*', part.strip()))
+    unknown = sorted(tagged - ids)
+    add('fail' if unknown else 'ok', f'AGENTS.md tags guard rules that do not exist: {unknown}' if unknown
+        else f'AGENTS.md tags {len(tagged)} guard rule(s), all defined')
+    feature_map = target / 'docs/feature-map'
+    features = [p for p in feature_map.glob('*.md') if p.name != 'README.md'] if feature_map.is_dir() else []
+    add('ok' if features else 'warn', f'feature map lists {len(features)} feature(s)' if features
+        else 'docs/feature-map/ has no feature files: agents and reviewers have no shared names or recipes for the screens')
+
+
+def all_poms(target):
+    """Text of every pom.xml in the project (multi-module builds configure plugins per module)."""
+    texts = []
+    for pom in target.rglob('pom.xml'):
+        if not {'target', 'node_modules', '.git'}.intersection(pom.relative_to(target).parts):
+            texts.append(pom.read_text(encoding='utf-8', errors='replace'))
+    return '\n'.join(texts)
+
+
+def tags(agents, tool):
+    names = set()
+    for tag in re.findall(r'〔' + tool + r':([^〕]*)〕', agents or ''):
+        names.update(part.strip() for part in tag.split(',') if re.fullmatch(r'[A-Za-z0-9_]+', part.strip()))
+    return names
+
+
+def doctor_structure(target, agents, add):
+    poms = all_poms(target)
+    test = target / ARCHUNIT / 'ArchitectureTest.java'
+    archunit_rules = tags(agents, 'ArchUnit')
+    if test.is_file() and 'archunit' not in poms:
+        add('fail', f'{ARCHUNIT}ArchitectureTest.java exists but no pom.xml has the archunit-junit5 dependency '
+                    f'({POM_SNIPPET}): test compilation fails')
+    elif archunit_rules and not test.is_file():
+        add('warn', 'AGENTS.md says ArchUnit checks the layers, but src/test/java/ArchitectureTest.java is missing: only '
+                    f"guard's import check runs (install with --with-archunit and add {POM_SNIPPET})")
+    elif archunit_rules:
+        source = test.read_text(encoding='utf-8', errors='replace')
+        missing = sorted(name for name in archunit_rules if not re.search(r'\bArchRule\s+' + name + r'\b', source))
+        add('fail' if missing else 'ok', f'AGENTS.md tags ArchUnit rules missing from ArchitectureTest.java: {missing}'
+            if missing else f'ArchitectureTest.java defines the {len(archunit_rules)} ArchUnit rule(s) AGENTS.md tags')
+    pmd_rules = tags(agents, 'PMD')
+    jsp = next((p for p in target.rglob('*.jsp')
+                if not {'target', 'node_modules', '.git'}.intersection(p.relative_to(target).parts)), None)
+    if not pmd_rules or jsp is None:
+        return
+    ruleset = target / 'config/pmd/jsp-ruleset.xml'
+    if 'config/pmd/jsp-ruleset.xml' not in poms or not ruleset.is_file():
+        add('warn', 'AGENTS.md says PMD checks JSP output escaping, but no pom.xml runs config/pmd/jsp-ruleset.xml: '
+                    f'unescaped EL in JSP is not detected (add the maven-pmd-plugin from {POM_SNIPPET})')
+        return
+    text = ruleset.read_text(encoding='utf-8', errors='replace')
+    missing = sorted(name for name in pmd_rules if '/' + name + '"' not in text)
+    add('fail' if missing else 'ok', f'AGENTS.md tags PMD rules missing from config/pmd/jsp-ruleset.xml: {missing}'
+        if missing else f'PMD runs the {len(pmd_rules)} JSP rule(s) AGENTS.md tags')
 
 
 def main(argv=None):
@@ -352,6 +445,8 @@ def main(argv=None):
     user.add_argument('--claude-dir', type=Path, default=Path.home() / '.claude')
     project.add_argument('--with-screen-tests', action='store_true',
                          help='also install screen-tests/ (a Node project that pins the screen-test framework)')
+    project.add_argument('--with-archunit', action='store_true',
+                         help='also install src/test/java/ArchitectureTest.java (needs the dependency in config/quality/pom-snippet.xml)')
     project.add_argument('--with-workflows', action='store_true',
                          help='also install .github/workflows/ (they need secrets and repository permissions)')
     check = sub.add_parser('doctor', help='check a project that already has the templates (read-only)')
@@ -382,7 +477,7 @@ def main(argv=None):
             print('warning: no pom.xml in target; templates assume a Maven project', file=sys.stderr)
         if not ((target / 'mvnw').is_file() or (target / 'mvnw.cmd').is_file()):
             print('warning: no Maven Wrapper (mvnw / mvnw.cmd) in target', file=sys.stderr)
-        actions = plan_project(target, args.with_workflows, args.with_screen_tests)
+        actions = plan_project(target, args.with_workflows, args.with_screen_tests, args.with_archunit)
     else:
         actions = plan_user(args.claude_dir.expanduser().resolve())
 

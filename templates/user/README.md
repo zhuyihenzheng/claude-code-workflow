@@ -14,6 +14,8 @@
 | `token-weather@claude-code-playground-mods` | 同上（维护者未安装，可选） | 提示框上方显示上下文窗口用量预报 | 上下文管理 |
 | `session-band@claude-kit` | [JohnnyVizz/claude-kit](https://github.com/JohnnyVizz/claude-kit)（MIT） | 提示框上方显示轮次、输出速度、本轮/会话成本、缓存倒计时、上下文占用 | 成本复盘（路线图阶段 3） |
 | `filetree@claude-code-filetree` | [data-goblin/claude-code-filetree](https://github.com/data-goblin/claude-code-filetree)（MIT） | IDE 式文件树面板，高亮 Claude 正在读/写的文件 | 观察 Claude 的探索范围 |
+| `pstack@cursor-plugins` | [cursor/plugins](https://github.com/cursor/plugins/tree/main/pstack) `pstack/`（MIT，Lauren Tan；维护者未安装，按需） | `/pstack:correct` 把反复出现的纠正落到架构、类型、lint、测试；`/pstack:no-comments` 删除为 workaround 辩护的注释；`/pstack:create-verification-skill` 生成验证 skill 与功能地图 | [15 纠正变成检查](../../docs/15-纠正变成检查.md)的出处；项目模板里的 `correct` / `feature-map` 是按本技术栈重写的版本。部分步骤依赖 Cursor 专有功能，在 Claude Code 中会跳过 |
+| `superpowers@claude-plugins-official` | [obra/superpowers](https://github.com/obra/superpowers)（MIT；维护者未安装，按需） | `verification-before-completion`：没有在本轮运行过验证命令并读过输出，就不许声称完成；另有 TDD、系统化调试等技能 | [03 标准工作流](../../docs/03-标准工作流.md)的“验证”，对应演讲里“证据先于结论” |
 
 安装（user scope）：
 
@@ -25,6 +27,11 @@ claude plugin marketplace add data-goblin/claude-code-filetree
 claude plugin install codex@openai-codex --scope user
 claude plugin install session-band@claude-kit --scope user
 claude plugin install filetree@claude-code-filetree --scope user
+
+# 演讲作者的技能包与“证据先于结论”的技能（按需）
+claude plugin marketplace add cursor/plugins
+claude plugin install pstack@cursor-plugins --scope user
+claude plugin install superpowers@claude-plugins-official --scope user
 
 # playground mods 以本地目录 marketplace 方式安装（需 Claude Code 2.1.287+）
 git clone https://github.com/anthropics/claude-code-playground.git ~/.local/share/claude-mod-sources/claude-code-playground

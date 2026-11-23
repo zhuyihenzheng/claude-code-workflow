@@ -38,12 +38,48 @@
       <artifactId>spring-boot-starter-test</artifactId>
       <scope>test</scope>
     </dependency>
+    <dependency>
+      <groupId>com.tngtech.archunit</groupId>
+      <artifactId>archunit-junit5</artifactId>
+      <version>1.5.1</version>
+      <scope>test</scope>
+    </dependency>
   </dependencies>
   <build>
     <plugins>
       <plugin>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-maven-plugin</artifactId>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-pmd-plugin</artifactId>
+        <version>3.28.0</version>
+        <configuration>
+          <language>jsp</language>
+          <rulesets>
+            <ruleset>config/pmd/jsp-ruleset.xml</ruleset>
+          </rulesets>
+          <compileSourceRoots>
+            <compileSourceRoot>${project.basedir}/src/main/webapp</compileSourceRoot>
+          </compileSourceRoots>
+          <includes>
+            <include>**/*.jsp</include>
+            <include>**/*.jspf</include>
+            <include>**/*.tag</include>
+          </includes>
+          <printFailingErrors>true</printFailingErrors>
+          <maxAllowedViolations>0</maxAllowedViolations>
+        </configuration>
+        <executions>
+          <execution>
+            <id>jsp-xss</id>
+            <phase>verify</phase>
+            <goals>
+              <goal>check</goal>
+            </goals>
+          </execution>
+        </executions>
       </plugin>
     </plugins>
   </build>

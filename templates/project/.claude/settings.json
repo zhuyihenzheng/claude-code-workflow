@@ -21,6 +21,14 @@
       "Bash(node run.mjs --engine playwright)",
       "Bash(node run.mjs --engine playwright --build-only)",
       "Bash(node run.mjs --engine playwright --only *)",
+      "Bash(python3 scripts/guard.py)",
+      "Bash(python3 scripts/guard.py *)",
+      "Bash(python scripts/guard.py)",
+      "Bash(python scripts/guard.py *)",
+      "PowerShell(python scripts/guard.py)",
+      "PowerShell(python scripts/guard.py *)",
+      "PowerShell(py scripts/guard.py)",
+      "PowerShell(py scripts/guard.py *)",
       "Bash(git status)",
       "Bash(git diff *)",
       "Bash(git log *)",
@@ -55,7 +63,10 @@
       "Bash(node *run.mjs *--engine ai*)",
       "Bash(node *run.mjs *--engine midscene*)",
       "Bash(node *run.mjs *--heal*)",
-      "Bash(node *run.mjs *--ai-assert*)"
+      "Bash(node *run.mjs *--ai-assert*)",
+      "Bash(*scripts/guard.py *--init-baseline*)",
+      "PowerShell(*scripts/guard.py *--init-baseline*)",
+      "Edit(/config/guard/baseline.json)"
     ]
   }
 }

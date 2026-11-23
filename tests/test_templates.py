@@ -151,6 +151,85 @@ class TemplateTests(unittest.TestCase):
         for script in set(re.findall(r'scripts/[\w.-]+\.(?:py|mjs)', skill)):
             self.assertTrue((PROJECT / script).is_file(), script)
 
+    def test_every_guard_rule_is_in_the_agents_md_ledger_and_every_tag_exists(self):
+        rules = json.loads((PROJECT / 'config/guard/rules.json').read_text(encoding='utf-8'))['rules']
+        ids = {rule['id'] for rule in rules}
+        agents = (PROJECT / 'AGENTS.md').read_text(encoding='utf-8')
+        tagged = {part.strip() for tag in re.findall(r'〔guard:([^〕]*)〕', agents) for part in tag.split(',')}
+        tagged.discard('…')
+        self.assertEqual(tagged, ids)
+        for rule in rules:
+            with self.subTest(rule=rule['id']):
+                self.assertTrue(rule['origin'])
+                self.assertTrue(rule['examples']['good'], 'a rule needs look-alike good examples against false positives')
+
+    def test_guard_permissions_let_agents_check_but_not_accept_violations(self):
+        perms = json.loads((PROJECT / '.claude/settings.json').read_text(encoding='utf-8'))['permissions']
+
+        def matching(kind, command, tool='Bash'):
+            prefix = tool + '('
+            return [r for r in perms[kind] if r.startswith(prefix) and rule_matches(r[len(prefix):-1], command)]
+
+        for command in ('python3 scripts/guard.py', 'python3 scripts/guard.py src/main/java',
+                        'python scripts/guard.py --list', 'python3 scripts/guard.py --update-baseline'):
+            with self.subTest(command=command):
+                self.assertTrue(matching('allow', command))
+                self.assertFalse(matching('ask', command) or matching('deny', command))
+        self.assertTrue(matching('allow', 'py scripts/guard.py', 'PowerShell'))
+        for command in ('python3 scripts/guard.py --init-baseline', 'python scripts/guard.py --root . --init-baseline'):
+            with self.subTest(command=command):
+                self.assertTrue(matching('ask', command))
+        self.assertTrue(matching('ask', 'py scripts/guard.py --init-baseline', 'PowerShell'))
+        self.assertIn('Edit(/config/guard/baseline.json)', perms['ask'])
+
+    def test_guard_runs_in_ci_and_the_skills_name_real_files(self):
+        self.assertIn('run: python3 scripts/guard.py --format github\n',
+                      (PROJECT / '.github/workflows/ci.yml.example').read_text(encoding='utf-8'))
+        for name in ('correct', 'feature-map', 'spring-endpoint', 'change-flow'):
+            text = (PROJECT / '.claude/skills' / name / 'SKILL.md').read_text(encoding='utf-8')
+            for path in set(re.findall(r'(?:scripts|config/guard|docs/feature-map)/[\w./-]+\.(?:py|mjs|json|md)', text)):
+                with self.subTest(skill=name, path=path):
+                    self.assertTrue((PROJECT / path).is_file(), path)
+
+    def test_archunit_and_pmd_tags_match_the_test_the_ruleset_and_the_sample_pom(self):
+        agents = (PROJECT / 'AGENTS.md').read_text(encoding='utf-8')
+
+        def tagged(tool):
+            names = {p.strip() for t in re.findall('〔' + tool + ':([^〕]*)〕', agents) for p in t.split(',')}
+            return {n for n in names if re.fullmatch(r'\w+', n)}
+
+        test = (PROJECT / 'src/test/java/ArchitectureTest.java').read_text(encoding='utf-8')
+        self.assertEqual(tagged('ArchUnit'), set(re.findall(r'@ArchTest\s+static final ArchRule (\w+)', test)))
+        self.assertNotRegex(test, r'^package ', 'the default package keeps the test independent of project packages')
+        ruleset = (PROJECT / 'config/pmd/jsp-ruleset.xml').read_text(encoding='utf-8')
+        self.assertEqual(tagged('PMD'), set(re.findall(r'ref="category/jsp/\w+\.xml/(\w+)"', ruleset)))
+
+        def blocks(text):
+            text = re.sub(r'<!--.*?-->', '', text, flags=re.S)
+            return [' '.join(b.split()) for b in re.findall(r'<(?:dependency|plugin)>.*?</(?:dependency|plugin)>', text, re.S)
+                    if 'archunit' in b or 'maven-pmd-plugin' in b]
+
+        snippet = blocks((PROJECT / 'config/quality/pom-snippet.xml').read_text(encoding='utf-8'))
+        self.assertEqual(len(snippet), 2)
+        self.assertEqual(blocks((ROOT / 'tests/fixtures/sample-app/pom.xml').read_text(encoding='utf-8')), snippet)
+        # check forks the pmd goal without the execution's configuration, so it must sit on the plugin.
+        plugin = snippet[1]
+        self.assertLess(plugin.index('<configuration>'), plugin.index('<executions>'))
+
+    def test_feature_map_files_follow_the_contract(self):
+        readme = (PROJECT / 'docs/feature-map/README.md').read_text(encoding='utf-8')
+        sections = re.findall(r'^\d\. `## ([^`]+)`', readme, re.MULTILINE)
+        self.assertEqual(len(sections), 4)
+        features = sorted((ROOT / 'tests/fixtures/sample-app/docs/feature-map').glob('*.md'))
+        self.assertTrue(features)
+        for path in features:
+            with self.subTest(path=path.name):
+                text = path.read_text(encoding='utf-8')
+                self.assertRegex(path.name, r'^[A-Z0-9]+-[a-z0-9-]+\.md$')
+                self.assertEqual(re.findall(r'^## (.+)$', text, re.MULTILINE), sections)
+                self.assertTrue(text.startswith('# ' + path.name.split('-')[0] + ' '))
+                self.assertIn('前提：', text)
+
     def test_mentions_are_separate_from_pr_automation(self):
         data = workflow('claude.yml')
         self.assertNotIn('pull_request', data['on'])

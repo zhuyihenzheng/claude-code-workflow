@@ -43,7 +43,7 @@ class InstallTests(unittest.TestCase):
         self.assertFalse((self.target / '.claude').exists())
 
     def test_apply_into_empty_project_copies_every_template_byte_for_byte(self):
-        run('project', self.target, '--apply', '--with-workflows', '--with-screen-tests')
+        run('project', self.target, '--apply', '--with-workflows', '--with-screen-tests', '--with-archunit')
         for rel, source in install.template_files(PROJECT):
             with self.subTest(rel=rel):
                 self.assertEqual((self.target / rel).read_bytes(), source.read_bytes())
@@ -65,6 +65,18 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(self.kinds()['.github/workflows/claude.yml'], 'skip')
         (workflows / 'claude.yml').write_text('name: mine\n', encoding='utf-8')
         self.assertEqual(self.kinds()['.github/workflows/claude.yml'], 'conflict')
+
+    def test_archunit_test_is_installed_only_on_request_and_needs_the_pom_dependency(self):
+        code, out, _ = run('project', self.target, '--apply')
+        self.assertEqual(code, 0)
+        self.assertFalse((self.target / 'src/test/java').exists())
+        self.assertRegex(out, r'optional\s+src/test/java/ArchitectureTest\.java\s+\(.*--with-archunit')
+        code, out, _ = run('project', self.target, '--with-archunit')
+        self.assertRegex(out, r'create\s+src/test/java/ArchitectureTest\.java\s+\(add the archunit-junit5 dependency')
+        (self.target / 'pom.xml').write_text('<project><artifactId>archunit-junit5</artifactId></project>', encoding='utf-8')
+        code, out, _ = run('project', self.target, '--with-archunit', '--apply')
+        self.assertRegex(out, r'create\s+src/test/java/ArchitectureTest\.java\n')
+        self.assertTrue((self.target / 'src/test/java/ArchitectureTest.java').is_file())
 
     def test_installed_sync_rules_reports_target_in_sync(self):
         run('project', self.target, '--apply')
@@ -267,6 +279,16 @@ class InstallTests(unittest.TestCase):
         code, out, _ = run('doctor', self.target)
         self.assertEqual(code, 0, out)
         self.assertIn('fail: 0', out)
+        self.assertRegex(out, r'warn\s+docs/feature-map/ has no feature files')
+        self.assertRegex(out, r'warn\s+AGENTS\.md says ArchUnit checks the layers')
+        (self.target / 'docs/feature-map/S01-order-new.md').write_text('# S01 注文登録\n', encoding='utf-8')
+        (self.target / 'pom.xml').write_text('<project><artifactId>archunit-junit5</artifactId></project>', encoding='utf-8')
+        run('project', self.target, '--apply', '--with-archunit')
+        code, out, _ = run('doctor', self.target)
+        self.assertRegex(out, r'ok\s+ArchitectureTest\.java defines the 3 ArchUnit rule\(s\)')
+        self.assertEqual(code, 0, out)
+        self.assertRegex(out, r'ok\s+guard passes')
+        self.assertRegex(out, r'ok\s+AGENTS\.md tags \d+ guard rule\(s\), all defined')
         # The only warnings left are the remote MCP services the template enables by default, if any.
         remote = {name for name, server in json.loads((PROJECT / '.mcp.json').read_text(encoding='utf-8'))['mcpServers'].items()
                   if server.get('url')}
@@ -296,6 +318,51 @@ class InstallTests(unittest.TestCase):
         self.assertTrue(any("'docs' is a remote service" in m for m in levels['warn']))
         self.assertTrue(any("'loose' is started with npx without a pinned version" in m for m in levels['warn']))
         self.assertFalse(any("'pinned'" in m for m in found))
+
+    def test_doctor_runs_guard_and_checks_the_rule_ledger(self):
+        run('project', self.target, '--apply')
+        controller = self.target / 'src/main/java/com/example/OrderController.java'
+        controller.parent.mkdir(parents=True)
+        controller.write_text('class OrderController {\n    @Autowired\n    private OrderService s;\n}\n', encoding='utf-8')
+        agents = self.target / 'AGENTS.md'
+        agents.write_text(agents.read_text(encoding='utf-8') + '- 架空の規約。〔guard: no-such-rule, jsp-no-scriptlet〕\n',
+                          encoding='utf-8')
+        found = self.doctor()
+        self.assertEqual(found['guard reports violations (run python3 scripts/guard.py); a person accepts existing '
+                               'violations with scripts/guard.py --init-baseline'], 'fail')
+        self.assertEqual(found["AGENTS.md tags guard rules that do not exist: ['no-such-rule']"], 'fail')
+        rules = self.target / 'config/guard/rules.json'
+        rules.write_text('{"rules": [{"id": "x"}]}', encoding='utf-8')
+        self.assertTrue(any(m.startswith('guard could not run its rules') and lv == 'fail' for m, lv in self.doctor().items()))
+        rules.unlink()
+        self.assertEqual(self.doctor()['scripts/guard.py or config/guard/rules.json is missing: corrections stay prose '
+                                       'that nothing enforces'], 'warn')
+
+    def test_doctor_checks_archunit_and_pmd_setup_against_agents_md(self):
+        run('project', self.target, '--apply', '--with-archunit')
+        found = self.doctor()
+        self.assertEqual(found['src/test/java/ArchitectureTest.java exists but no pom.xml has the archunit-junit5 dependency '
+                               '(config/quality/pom-snippet.xml): test compilation fails'], 'fail')
+        snippet = (PROJECT / 'config/quality/pom-snippet.xml').read_text(encoding='utf-8')
+        module = self.target / 'order-web'
+        (module / 'src/main/webapp').mkdir(parents=True)
+        (module / 'src/main/webapp/a.jsp').write_text('<p>${x}</p>\n', encoding='utf-8')
+        (module / 'pom.xml').write_text('<project><dependencies/></project>', encoding='utf-8')
+        found = self.doctor()
+        self.assertTrue(any(m.startswith('AGENTS.md says PMD checks JSP output escaping') and lv == 'warn' for m, lv in found.items()))
+        (module / 'pom.xml').write_text(snippet, encoding='utf-8')
+        found = self.doctor()
+        self.assertEqual(found['ArchitectureTest.java defines the 3 ArchUnit rule(s) AGENTS.md tags'], 'ok')
+        self.assertEqual(found['PMD runs the 1 JSP rule(s) AGENTS.md tags'], 'ok')
+        test = self.target / 'src/test/java/ArchitectureTest.java'
+        test.write_text(test.read_text(encoding='utf-8').replace('no_field_injection', 'renamed'), encoding='utf-8')
+        ruleset = self.target / 'config/pmd/jsp-ruleset.xml'
+        ruleset.write_text(ruleset.read_text(encoding='utf-8').replace('NoUnsanitizedJSPExpression', 'NoScriptlets'),
+                           encoding='utf-8')
+        found = self.doctor()
+        self.assertEqual(found["AGENTS.md tags ArchUnit rules missing from ArchitectureTest.java: ['no_field_injection']"], 'fail')
+        self.assertEqual(found["AGENTS.md tags PMD rules missing from config/pmd/jsp-ruleset.xml: ['NoUnsanitizedJSPExpression']"],
+                         'fail')
 
     def test_doctor_flags_tracked_local_files_and_writes_nothing(self):
         git = shutil.which('git')

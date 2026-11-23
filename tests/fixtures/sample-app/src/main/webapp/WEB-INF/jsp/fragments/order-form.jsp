@@ -1,8 +1,9 @@
 <%@ page contentType="text/html; charset=UTF-8" pageEncoding="UTF-8" %>
 <%@ taglib prefix="c" uri="jakarta.tags.core" %>
+<%@ taglib prefix="fn" uri="jakarta.tags.functions" %>
 <form hx-post="/orders" hx-target="#order-form">
   <label for="name">名前</label>
-  <input id="name" name="name" value="<c:out value='${name}'/>">
+  <input id="name" name="name" value="${fn:escapeXml(name)}">
   <button id="submit">登録</button>
   <c:if test="${not empty error}"><p id="name-error" class="error"><c:out value="${error}"/></p></c:if>
 </form>

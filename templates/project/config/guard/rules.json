@@ -1,0 +1,115 @@
+{
+  "_note": "guard.py のルール。人の修正指示やレビュー指摘で同じ誤りが 2 回出たら、ここにルールを追加する（/correct）。message には直し方（何を使うか）を書き、examples.bad には実際にあった誤りを入れる。pattern は Python の正規表現で、ファイル全体に複数行モードで適用する。",
+  "rules": [
+    {
+      "id": "jsp-no-scriptlet",
+      "files": ["**/*.jsp", "**/*.jspf", "**/*.tag"],
+      "pattern": "<%(?![@-])",
+      "message": "JSP に scriptlet（<% %>、<%= %>、<%! %>）を書かない。値は Controller で Model に入れ、<c:out value=\"${...}\"/> で出力する。分岐と繰り返しは <c:if>／<c:forEach> を使う。",
+      "origin": "AGENTS.md「画面の実装規約と検証」",
+      "examples": {
+        "bad": ["<% String name = request.getParameter(\"name\"); %>", "<p><%= order.getName() %></p>"],
+        "good": ["<%@ page contentType=\"text/html; charset=UTF-8\" %>", "<%-- 注文の入力フォーム --%>", "<p><c:out value=\"${order.name}\"/></p>"]
+      }
+    },
+    {
+      "id": "java-no-field-injection",
+      "files": ["**/src/main/java/**/*.java"],
+      "pattern": "@(?:Autowired|Inject|Resource)\\b(?:\\s*\\([^)]*\\))?(?:\\s+@\\w+(?:\\([^)]*\\))?)*\\s+(?:(?:private|protected|public|static|final|transient|volatile)\\s+)*[\\w.]+(?:<[^;(){}]*>)?(?:\\[\\])*\\s+\\w+\\s*(?:=[^;]*)?;",
+      "message": "フィールドインジェクションを使わない。依存は private final フィールドにし、コンストラクタの引数で受け取る（コンストラクタが 1 つなら @Autowired は不要）。",
+      "origin": "AGENTS.md「コーディング規約」",
+      "examples": {
+        "bad": ["@Autowired\nprivate OrderService orderService;", "@Autowired @Qualifier(\"main\")\nprivate DataSource dataSource;", "@Autowired\nprivate Map<String, PaymentGateway> gateways;"],
+        "good": ["private final OrderService orderService;\n\npublic OrderController(OrderService orderService) {\n    this.orderService = orderService;\n}", "@Autowired\npublic OrderController(OrderService orderService) {\n    this.orderService = orderService;\n}", "@Autowired\nvoid setClock(Clock clock) {\n    this.clock = clock;\n}"]
+      }
+    },
+    {
+      "id": "controller-no-persistence",
+      "files": ["**/src/main/java/**/*Controller.java", "**/src/main/java/**/*ControllerAdvice.java"],
+      "pattern": "^import\\s+(?!org\\.springframework\\.|java\\.|javax\\.|jakarta\\.)[\\w.]*(?:\\.(?:repository|repositories|mapper|mappers|dao|persistence)\\.[\\w.]+|\\.\\w+(?:Repository|Dao|DAO))\\s*;",
+      "message": "Controller から永続化層（Repository／Mapper／DAO）を直接使わない。必要な処理を Service のメソッドとして追加し、Controller は Service だけを呼ぶ。",
+      "origin": "AGENTS.md「コーディング規約」（Controller → Service → Mapper/Repository）",
+      "examples": {
+        "bad": ["import com.example.order.mapper.OrderMapper;", "import com.example.order.OrderRepository;"],
+        "good": ["import com.example.order.service.OrderService;", "import org.springframework.web.bind.annotation.RequestMapping;", "import com.fasterxml.jackson.databind.ObjectMapper;"]
+      }
+    },
+    {
+      "id": "java-no-empty-catch",
+      "files": ["**/src/main/java/**/*.java"],
+      "pattern": "catch\\s*\\([^)]*\\)\\s*\\{(?:\\s|//[^\\n]*|/\\*(?:[^*]|\\*(?!/))*\\*/)*\\}",
+      "message": "例外を握りつぶさない（空の catch、コメントだけの catch）。呼び出し元へ投げ直すか、共通の例外処理（@ControllerAdvice など）に任せる。業務上無視してよい例外なら、その判断をメソッド名や戻り値で表し、ログを出す。",
+      "origin": "AGENTS.md「コーディング規約」（例外を握りつぶさない）",
+      "examples": {
+        "bad": ["try {\n    mapper.insert(order);\n} catch (DataAccessException e) {\n}", "} catch (IOException e) {\n    // 無視してよい\n}"],
+        "good": ["} catch (DataAccessException e) {\n    throw new OrderSaveException(order.id(), e);\n}", "} catch (IOException e) {\n    log.warn(\"一時ファイルを削除できませんでした\", e);\n}"]
+      }
+    },
+    {
+      "id": "java-no-print-stack-trace",
+      "files": ["**/src/main/java/**/*.java"],
+      "pattern": "\\.printStackTrace\\s*\\(\\s*\\)",
+      "message": "printStackTrace() を使わない。ロガー（log.error(\"...\", e)）で出力し、処理を続けられない場合は例外を投げ直す。",
+      "origin": "AGENTS.md「コーディング規約」（例外を握りつぶさない）",
+      "examples": {
+        "bad": ["} catch (Exception e) {\n    e.printStackTrace();\n}"],
+        "good": ["} catch (Exception e) {\n    log.error(\"注文の登録に失敗しました\", e);\n    throw e;\n}"]
+      }
+    },
+    {
+      "id": "java-no-thread-sleep",
+      "files": ["**/src/main/java/**/*.java", "**/src/test/java/**/*.java"],
+      "pattern": "\\bThread\\.sleep\\s*\\(|\\bTimeUnit\\.\\w+\\.sleep\\s*\\(",
+      "message": "Thread.sleep で待ち合わせない（タイミングの問題を隠し、遅く不安定になる）。テストは Awaitility などで状態を待ち、本番コードは Future、ロック、@Scheduled などで順序を保証する。",
+      "origin": "講演「All Code Is Slop (Except Mine)」：タイマーによる応急処置が広がった事例",
+      "examples": {
+        "bad": ["Thread.sleep(500);", "TimeUnit.SECONDS.sleep(1);"],
+        "good": ["await().atMost(Duration.ofSeconds(5)).until(() -> mapper.count() == 1);"]
+      }
+    },
+    {
+      "id": "e2e-no-fixed-wait",
+      "files": ["screen-tests/**/*.mjs", "screen-tests/**/*.js", "**/src/test/**/*.js", "**/src/test/**/*.mjs", "**/src/test/**/*.ts"],
+      "pattern": "\\bwaitForTimeout\\s*\\(",
+      "message": "固定時間の待機（waitForTimeout）を使わない。画面の状態を待つ（expect(...).toContainText()、waitForResponse()、waitForURL() など）。",
+      "origin": "講演「All Code Is Slop (Except Mine)」：タイマーによる応急処置が広がった事例",
+      "examples": {
+        "bad": ["await page.waitForTimeout(1000);"],
+        "good": ["await expect(page.locator('#order-form')).toContainText('登録しました');"]
+      }
+    },
+    {
+      "id": "test-no-disabled",
+      "files": ["**/src/test/java/**/*.java"],
+      "pattern": "^\\s*@(?:Disabled|Ignore)\\b",
+      "message": "テストを無効化して通さない。失敗の原因を直す（実装の不具合なら実装を、期待値の誤りなら設計書を根拠に期待値を直す）。どうしても止める場合は人が guard:allow（期限・承認者・理由）を付ける。",
+      "origin": "AGENTS.md「コーディング規約」（テスト）",
+      "examples": {
+        "bad": ["@Disabled\n@Test\nvoid createsOrder() {", "    @Ignore(\"不安定なため\")\n    @Test"],
+        "good": ["@Test\nvoid createsOrder() {", "@IgnoreForBinding\nString internal;"]
+      }
+    },
+    {
+      "id": "comment-workaround",
+      "files": ["**/src/main/**/*.java", "**/src/main/**/*.js", "**/*.jsp", "**/*.jspf", "**/*.tag"],
+      "pattern": "(?:(?<![:\"'=\\w])//|/\\*|<%--|<!--|^[ \\t]*\\*)[^\\n]*?(?:暫定|とりあえず|一時的|応急|回避策|ワークアラウンド|(?i:\\bworkaround\\b|\\bhack\\b|\\bquick[ -]?fix\\b)|\\bFIXME\\b)",
+      "message": "回避策を正当化するコメントを書かない（コメントは何も強制できず、次のエージェントが同じ回避策を真似る）。根本原因を直す。直せない外部の制約は、テストや guard のルールで表し、課題番号を残す。",
+      "origin": "講演「All Code Is Slop (Except Mine)」：コメントが回避策の言い訳になる",
+      "examples": {
+        "bad": ["// 暫定対応：二重送信を防ぐため 500ms 待つ", "/* workaround for race condition */", "<%-- とりあえずここで変換する --%>", " * FIXME 後で直す"],
+        "good": ["// 外部 API の仕様で、金額は文字列で返る（課題 #123）", "String status = \"暫定\";", "/** 注文を登録する。 */", "<a href=\"https://example.com/help\">現在一時的にご利用いただけません</a>"]
+      }
+    },
+    {
+      "id": "java-no-commented-out-code",
+      "files": ["**/src/main/java/**/*.java"],
+      "pattern": "^[ \\t]*//[^\\n]*;[ \\t]*$",
+      "message": "コメントアウトしたコードを残さない。不要なら削除する（履歴は git に残る）。",
+      "origin": "講演「All Code Is Slop (Except Mine)」：コメントの大半を禁止する",
+      "examples": {
+        "bad": ["// orderMapper.insert(order);", "//    return \"orders/new\";"],
+        "good": ["// 金額は税込みで保持する", "int total = price * quantity; // 税込み"]
+      }
+    }
+  ]
+}
