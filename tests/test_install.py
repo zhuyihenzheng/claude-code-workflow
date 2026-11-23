@@ -43,7 +43,8 @@ class InstallTests(unittest.TestCase):
         self.assertFalse((self.target / '.claude').exists())
 
     def test_apply_into_empty_project_copies_every_template_byte_for_byte(self):
-        run('project', self.target, '--apply', '--with-workflows', '--with-screen-tests', '--with-archunit')
+        run('project', self.target, '--apply', '--with-workflows', '--with-screen-tests', '--with-archunit',
+            '--with-copilot-cloud-agent')
         for rel, source in install.template_files(PROJECT):
             with self.subTest(rel=rel):
                 self.assertEqual((self.target / rel).read_bytes(), source.read_bytes())
@@ -77,6 +78,17 @@ class InstallTests(unittest.TestCase):
         code, out, _ = run('project', self.target, '--with-archunit', '--apply')
         self.assertRegex(out, r'create\s+src/test/java/ArchitectureTest\.java\n')
         self.assertTrue((self.target / 'src/test/java/ArchitectureTest.java').is_file())
+
+    def test_copilot_cloud_agent_setup_is_a_separate_opt_in(self):
+        setup = self.target / '.github/workflows/copilot-setup-steps.yml.example'
+        code, out, _ = run('project', self.target, '--apply', '--with-workflows')
+        self.assertEqual(code, 0)
+        self.assertFalse(setup.exists(), '--with-workflows alone does not set up the Copilot cloud agent')
+        self.assertRegex(out, r'optional\s+\.github/workflows/copilot-setup-steps\.yml\.example\s+\(.*--with-copilot-cloud-agent')
+        self.assertTrue((self.target / '.github/workflows/ci.yml.example').is_file())
+        run('project', self.target, '--apply', '--with-copilot-cloud-agent')
+        self.assertTrue(setup.is_file())
+        self.assertEqual(self.kinds()['.github/workflows/copilot-setup-steps.yml.example'], 'skip')
 
     def test_installed_sync_rules_reports_target_in_sync(self):
         run('project', self.target, '--apply')
@@ -284,6 +296,8 @@ class InstallTests(unittest.TestCase):
         (self.target / 'docs/feature-map/S01-order-new.md').write_text('# S01 注文登録\n', encoding='utf-8')
         (self.target / 'pom.xml').write_text('<project><artifactId>archunit-junit5</artifactId></project>', encoding='utf-8')
         run('project', self.target, '--apply', '--with-archunit')
+        self.assertRegex(out, r'warn\s+no CODEOWNERS')
+        (self.target / '.github/CODEOWNERS').write_text('/config/guard/ @org/leads\n', encoding='utf-8')
         code, out, _ = run('doctor', self.target)
         self.assertRegex(out, r'ok\s+ArchitectureTest\.java defines the 3 ArchUnit rule\(s\)')
         self.assertEqual(code, 0, out)
@@ -363,6 +377,18 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(found["AGENTS.md tags ArchUnit rules missing from ArchitectureTest.java: ['no_field_injection']"], 'fail')
         self.assertEqual(found["AGENTS.md tags PMD rules missing from config/pmd/jsp-ruleset.xml: ['NoUnsanitizedJSPExpression']"],
                          'fail')
+
+    def test_doctor_checks_that_a_person_owns_the_guard_rules(self):
+        run('project', self.target, '--apply')
+        example = (self.target / '.github/CODEOWNERS.example').read_text(encoding='utf-8')
+        owners = self.target / '.github/CODEOWNERS'
+        owners.write_text(example, encoding='utf-8')
+        self.assertEqual(self.doctor()['.github/CODEOWNERS still has the @OWNER placeholder'], 'fail')
+        owners.write_text(example.replace('@OWNER', '@org/leads'), encoding='utf-8')
+        self.assertEqual(self.doctor()['.github/CODEOWNERS covers config/guard/'], 'ok')
+        owners.write_text('/src/ @org/devs\n', encoding='utf-8')
+        self.assertTrue(any(m.startswith('.github/CODEOWNERS has no owner for /config/guard/') and lv == 'warn'
+                            for m, lv in self.doctor().items()))
 
     def test_doctor_flags_tracked_local_files_and_writes_nothing(self):
         git = shutil.which('git')

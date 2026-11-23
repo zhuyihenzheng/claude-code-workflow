@@ -1,0 +1,21 @@
+# 任意で有効化する。使用する場合は .github/CODEOWNERS に名前を変え、@OWNER をレビュー担当
+# （例 @your-org/tech-leads）に置き換える。ブランチ保護で「Require review from Code Owners」を
+# 有効にした場合だけ、これらのファイルを変更する PR に担当者の承認が必須になる。
+# 対象は、AI（Claude Code / GitHub Copilot）が自分で緩めてはいけないルールと、その受け入れの記録。
+# Claude Code は .claude/settings.json の deny／ask でも止めるが、Copilot には同じ仕組みがない。
+
+# 決定的チェックのルールと、既存の違反・例外の受け入れ
+/config/guard/                         @OWNER
+/config/pmd/                           @OWNER
+/config/quality/                       @OWNER
+/src/test/java/ArchitectureTest.java   @OWNER
+
+# AI へのルールとレビュー基準
+/AGENTS.md                             @OWNER
+/CLAUDE.md                             @OWNER
+/REVIEW.md                             @OWNER
+/.claude/                              @OWNER
+/.github/                              @OWNER
+
+# 画面試験の基準（人だけが更新する）
+/screen-tests/baseline.json            @OWNER

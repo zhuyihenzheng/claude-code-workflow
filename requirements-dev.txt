@@ -1,4 +1,4 @@
 PyYAML==6.0.3
-exstruct==0.9.0
+exstruct==0.9.1
 excel2md==2.3.0
 ruff==0.17.5

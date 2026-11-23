@@ -35,7 +35,7 @@
 | [08 · 参考来源](docs/08-参考来源.md) | 一手依据、校验工具与证据边界 |
 | [09 · 审查与修复](docs/09-审查与修复.md) | 按轮次记录的问题、修复、验证结果与剩余限制（历史记录，只追加） |
 | [10 · PR 指摘对应](docs/10-PR指摘对应.md) | PR #1 的 10 条 review 逐条对应，作为“修复后交给 Claude 复审”的实例 |
-| [11 · Excel 设计书](docs/11-Excel设计书.md) | 省 token 的读取方案：工具实测比较、`xlsx2ai.py` 增量转换（sheet JSON + Mermaid 流程图）、MCP 的定位 |
+| [11 · Excel 设计书](docs/11-Excel设计书.md) | 转成人和 AI 都能读的 Markdown：7 种工具在日文方眼纸设计书上的实测、`xlsx2ai.py` 的结构还原（表、标题、缩进列表、Mermaid）、Excel 设计书的画面试验观点覆盖、MCP 的定位 |
 | [14 · 改修流程与画面试验](docs/14-改修流程与画面试验.md) | 设计书 → 实现 → 测试 → 画面试验 → 试验书的一条流程；整合 midscene-poc；用变更指示安全地改 Excel |
 | [13 · 控制矩阵](docs/13-控制矩阵.md) | 每条要求写在哪、谁拦、谁证明、还缺什么；导入后的 `doctor` 检查 |
 | [15 · 纠正变成检查](docs/15-纠正变成检查.md) | 解读演讲「All Code Is Slop (Except Mine)」：倒置的信任金字塔；`guard.py` 确定性检查、`correct` 流程、功能地图、评审看证据；刻意不做的自动合并 |
@@ -60,6 +60,7 @@ python3 scripts/install.py project /path/to/your-project --diff   # 预演，并
 python3 scripts/install.py project /path/to/your-project --apply  # 写入
 python3 scripts/install.py project /path/to/your-project --apply --with-screen-tests   # 连同画面试验（midscene-poc）
 python3 scripts/install.py project /path/to/your-project --apply --with-archunit        # 连同 ArchUnit 分层测试（需按 config/quality/pom-snippet.xml 改 pom）
+python3 scripts/install.py project /path/to/your-project --apply --with-copilot-cloud-agent   # 仅在使用 Copilot 云端 agent 时：环境准备 workflow
 python3 scripts/install.py doctor /path/to/your-project           # 导入后检查：TODO 是否填完、规则是否同步、guard 是否通过、配置有无风险
 python3 scripts/install.py user --apply                           # 个人级 skills → ~/.claude/skills
 ```
@@ -83,6 +84,9 @@ CLAUDE.md                         @AGENTS.md + Claude Code 专属补充
 .github/copilot-instructions.md   Copilot 入口摘要
 .github/instructions/             由 rules 生成的 Copilot 路径指令
 .github/pull_request_template.md  验证证据在前的 PR 模板
+.github/CODEOWNERS.example        改名后：guard 规则与基线、AI 规则的修改必须由指定的人批准（对 Copilot 也生效）
+REVIEW.md                         评审顺序与观点：Claude 的评审子代理、Copilot code review 与人审共用
+config/copilot/                   Copilot 的内容排除清单（与 settings 的 deny 一致）与设置说明
 config/guard/rules.json           guard 规则：每条带修法、来源与真实错误样例（起始 10 条）
 config/pmd/jsp-ruleset.xml        PMD 的 JSP 转义检查（NoUnsanitizedJSPExpression）
 config/quality/pom-snippet.xml    加进 pom.xml 的 ArchUnit 依赖与 maven-pmd-plugin，二者都在 ./mvnw verify 中运行
@@ -91,7 +95,7 @@ docs/feature-map/README.md        功能地图的书式：一个功能一个文�
 scripts/sync_rules.py             rules → Copilot 指令的同步与 --check
 scripts/guard.py                  确定性检查：新违规、过期例外、写坏的规则即失败；既有违规只减不增
 scripts/htmx-check.mjs            真实浏览器验证 HTMX 片段替换（含登录态、会话失效）
-scripts/xlsx2ai.py                Excel 设计书 → 按 sheet 拆分的 JSON / Mermaid
+scripts/xlsx2ai.py                Excel 设计书 → 按 sheet 拆分的 Markdown（表、标题、缩进列表、Mermaid）与 JSON
 scripts/xlsx_patch.py             按变更指示改 Excel：只动指定的单元格，其余逐字节不变
 screen-tests/                     （可选）画面试验：固定版本的 midscene-poc
 src/test/java/ArchitectureTest.java （可选，--with-archunit）按编译后的依赖检查分层与字段注入
@@ -115,6 +119,7 @@ python3 -m unittest discover -s tests -v
 | Stop hook 参考样例：模拟与真实 Maven（仅 POSIX） | Copilot 各入口是否读取 AGENTS.md 与路径指令 |
 | `guard.py`：单元测试（三平台）；示例应用上通过、注入真实错误后报出修法；功能地图里的命令在运行中的应用上逐条执行（Ubuntu） | 起始规则在真实业务代码上的误报率；`correct` 在真实纠正上的表现 |
 | ArchUnit 与 PMD：示例应用的 `./mvnw verify`；同包引用 guard 查不到而 ArchUnit 失败；未转义的 EL 使 PMD 失败（Ubuntu） | 多模块、既有大量违规的项目上的导入（Freezing 与 `maxAllowedViolations`） |
+| Excel 设计书 → Markdown：合成工作簿的单元测试（三平台）；示例应用的 Excel 版设计书经转换后，画面试验的观点覆盖与 Markdown 原稿一致（Ubuntu） | 版式与公开样本不同的真实设计书上的还原质量 |
 
 本地测试不调用 Claude API；缺少 Playwright 时浏览器测试会跳过，CI 中强制执行。逐轮的问题与修复记录见 [09 · 审查与修复](docs/09-审查与修复.md)，Windows 搭建见 [02 · 基础搭建](docs/02-基础搭建.md#6-windows-两条路径)。
 

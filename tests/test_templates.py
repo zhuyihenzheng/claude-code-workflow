@@ -216,6 +216,47 @@ class TemplateTests(unittest.TestCase):
         plugin = snippet[1]
         self.assertLess(plugin.index('<configuration>'), plugin.index('<executions>'))
 
+    def test_copilot_setup_steps_follow_the_documented_contract_and_pins(self):
+        data = workflow('copilot-setup-steps.yml.example')
+        self.assertEqual(set(data['jobs']), {'copilot-setup-steps'})
+        job = data['jobs']['copilot-setup-steps']
+        self.assertLessEqual(set(job), {'steps', 'permissions', 'runs-on', 'services', 'snapshot', 'timeout-minutes'})
+        self.assertLessEqual(int(job['timeout-minutes']), 59)
+        self.assertEqual(job['permissions'], {'contents': 'read'})
+        runs = '\n'.join(step.get('run', '') for step in job['steps'])
+        for pin in (line.strip() for line in (ROOT / 'requirements-dev.txt').read_text(encoding='utf-8').splitlines()):
+            if pin.startswith(('exstruct==', 'excel2md==')):
+                self.assertIn(f'"{pin}"', runs)
+        package = json.loads((PROJECT / 'screen-tests/package.json').read_text(encoding='utf-8'))
+        self.assertIn(f"playwright@{package['devDependencies']['playwright']}", runs)
+        # A failing step skips the rest, so the step most likely to fail (Maven) comes last.
+        self.assertIn('mvnw', job['steps'][-1]['run'])
+
+    def test_copilot_content_exclusion_mirrors_the_read_deny_rules(self):
+        deny = json.loads((PROJECT / '.claude/settings.json').read_text(encoding='utf-8'))['permissions']['deny']
+        expected = {rule[5:-1].removeprefix('/**/') for rule in deny if rule.startswith('Read(')}
+        listed = set(yaml.safe_load((PROJECT / 'config/copilot/content-exclusion.yml').read_text(encoding='utf-8')))
+        self.assertEqual(listed, expected)
+
+    def test_codeowners_example_and_review_criteria_are_shared(self):
+        owners = (PROJECT / '.github/CODEOWNERS.example').read_text(encoding='utf-8')
+        paths = {line.split()[0] for line in owners.splitlines() if line.strip() and not line.startswith('#')}
+        for path in ('/config/guard/', '/config/pmd/', '/src/test/java/ArchitectureTest.java', '/AGENTS.md', '/REVIEW.md',
+                     '/.claude/', '/screen-tests/baseline.json'):
+            self.assertIn(path, paths)
+        review = (PROJECT / 'REVIEW.md').read_text(encoding='utf-8')
+        for needle in ('guard:allow', 'baseline.json', 'レビュー未完了', '証跡'):
+            self.assertIn(needle, review)
+        self.assertIn('REVIEW.md', (PROJECT / '.claude/agents/code-reviewer.md').read_text(encoding='utf-8'))
+        self.assertIn('REVIEW.md', (PROJECT / '.github/copilot-instructions.md').read_text(encoding='utf-8'))
+        self.assertIn('REVIEW.md', workflow('claude-review.yml.example')['jobs']['review']['steps'][-1]['with']['prompt'])
+        for path in (PROJECT / '.claude/skills').glob('*/SKILL.md'):
+            text = path.read_text(encoding='utf-8')
+            if 'code-reviewer' in text:
+                with self.subTest(skill=path.parent.name):
+                    self.assertIn('REVIEW.md', text)
+                    self.assertIn('Copilot', text)
+
     def test_feature_map_files_follow_the_contract(self):
         readme = (PROJECT / 'docs/feature-map/README.md').read_text(encoding='utf-8')
         sections = re.findall(r'^\d\. `## ([^`]+)`', readme, re.MULTILINE)

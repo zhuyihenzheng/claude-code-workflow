@@ -18,6 +18,8 @@ Existing files are never overwritten:
   project that installs the screen-test framework from GitHub)
 * .github/workflows/*      -> optional (only with --with-workflows: they run
   with repository permissions and need secrets)
+* .github/workflows/copilot-setup-steps.yml.example -> optional (only with
+  --with-copilot-cloud-agent; not part of --with-workflows)
 * src/test/java/*          -> optional (only with --with-archunit: the ArchUnit test
   compiles only after the dependency in config/quality/pom-snippet.xml is added)
 
@@ -30,6 +32,7 @@ Exit code: 0 on success, 1 if a file could not be written or ``doctor`` found a 
 
 Usage:
     python3 scripts/install.py project /path/to/project [--apply] [--diff] [--with-workflows] [--with-screen-tests] [--with-archunit]
+                                      [--with-copilot-cloud-agent]
     python3 scripts/install.py user [--claude-dir ~/.claude] [--apply] [--diff]
     python3 scripts/install.py doctor /path/to/project
 """
@@ -55,6 +58,8 @@ WORKFLOWS = '.github/workflows/'
 SCREEN_TESTS = 'screen-tests/'
 # Compiles only once the project's pom.xml has the ArchUnit dependency.
 ARCHUNIT = 'src/test/java/'
+# Only for teams that use the GitHub Copilot cloud agent; kept apart from the other workflows.
+COPILOT_CLOUD_AGENT = '.github/workflows/copilot-setup-steps.yml.example'
 POM_SNIPPET = 'config/quality/pom-snippet.xml'
 KINDS = ('create', 'merge', 'skip', 'conflict', 'optional', 'error')
 PERMISSION_LISTS = ('allow', 'deny', 'ask')
@@ -185,11 +190,14 @@ def plan_file(rel, source, dest, merge_kind=None):
     return Action('conflict', rel, source, dest, note='differs from template; compare and merge manually')
 
 
-def plan_project(target, with_workflows=False, with_screen_tests=False, with_archunit=False):
+def plan_project(target, with_workflows=False, with_screen_tests=False, with_archunit=False,
+                 with_copilot_cloud_agent=False):
     actions = []
     for rel, source in template_files(PROJECT_TEMPLATES):
         dest = target / rel
-        flag = ('--with-workflows' if rel.startswith(WORKFLOWS) and not with_workflows
+        flag = ('--with-copilot-cloud-agent' if rel == COPILOT_CLOUD_AGENT and not with_copilot_cloud_agent
+                else None if rel == COPILOT_CLOUD_AGENT
+                else '--with-workflows' if rel.startswith(WORKFLOWS) and not with_workflows
                 else '--with-screen-tests' if rel.startswith(SCREEN_TESTS) and not with_screen_tests
                 else '--with-archunit' if rel.startswith(ARCHUNIT) and not with_archunit else None)
         if flag and not os.path.lexists(dest):
@@ -345,6 +353,7 @@ def doctor(target):
 
     doctor_guard(target, agents, add)
     doctor_structure(target, agents, add)
+    doctor_codeowners(target, add)
 
     git = shutil.which('git')
     if git and (target / '.git').exists():
@@ -436,6 +445,24 @@ def doctor_structure(target, agents, add):
         if missing else f'PMD runs the {len(pmd_rules)} JSP rule(s) AGENTS.md tags')
 
 
+def doctor_codeowners(target, add):
+    """Changes to guard rules, the baseline and AI rules should need a person's approval (Copilot has no ask rules)."""
+    path = next((target / p for p in ('.github/CODEOWNERS', 'CODEOWNERS', 'docs/CODEOWNERS') if (target / p).is_file()), None)
+    if path is None:
+        add('warn', 'no CODEOWNERS: changes to guard rules, the baseline and AI rules need no human approval '
+                    '(see .github/CODEOWNERS.example; Copilot is not bound by .claude/settings.json)')
+        return
+    rules = [line.split() for line in path.read_text(encoding='utf-8', errors='replace').splitlines()
+             if line.strip() and not line.lstrip().startswith('#')]
+    if any('@OWNER' in parts for parts in rules):
+        add('fail', f'{path.relative_to(target).as_posix()} still has the @OWNER placeholder')
+        return
+    covered = any(parts[0] in ('*', '/config/', '/config/guard/', 'config/guard/', '/config/guard/**') for parts in rules)
+    add('ok' if covered else 'warn', f'{path.relative_to(target).as_posix()} covers config/guard/' if covered
+        else f'{path.relative_to(target).as_posix()} has no owner for /config/guard/: guard rules and the baseline '
+             'can change without a required reviewer')
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     sub = parser.add_subparsers(dest='scope', required=True)
@@ -445,6 +472,8 @@ def main(argv=None):
     user.add_argument('--claude-dir', type=Path, default=Path.home() / '.claude')
     project.add_argument('--with-screen-tests', action='store_true',
                          help='also install screen-tests/ (a Node project that pins the screen-test framework)')
+    project.add_argument('--with-copilot-cloud-agent', action='store_true',
+                         help='also install .github/workflows/copilot-setup-steps.yml.example (GitHub Copilot cloud agent only)')
     project.add_argument('--with-archunit', action='store_true',
                          help='also install src/test/java/ArchitectureTest.java (needs the dependency in config/quality/pom-snippet.xml)')
     project.add_argument('--with-workflows', action='store_true',
@@ -477,7 +506,8 @@ def main(argv=None):
             print('warning: no pom.xml in target; templates assume a Maven project', file=sys.stderr)
         if not ((target / 'mvnw').is_file() or (target / 'mvnw.cmd').is_file()):
             print('warning: no Maven Wrapper (mvnw / mvnw.cmd) in target', file=sys.stderr)
-        actions = plan_project(target, args.with_workflows, args.with_screen_tests, args.with_archunit)
+        actions = plan_project(target, args.with_workflows, args.with_screen_tests, args.with_archunit,
+                               args.with_copilot_cloud_agent)
     else:
         actions = plan_user(args.claude_dir.expanduser().resolve())
 
