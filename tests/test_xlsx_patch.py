@@ -259,6 +259,105 @@ class XlsxPatchTests(unittest.TestCase):
         self.assertIn('ファイルの削除：xl/media/image1.png', log)
 
 
+    def rewrite(self, source, dest, **parts):
+        """Copy a workbook replacing whole parts: rewrite(src, dst, **{'xl/workbook.xml': fn}) with fn(text) -> text."""
+        with zipfile.ZipFile(source) as src, zipfile.ZipFile(dest, 'w', zipfile.ZIP_DEFLATED) as dst:
+            for item in src.infolist():
+                data = src.read(item.filename)
+                if item.filename in parts:
+                    data = parts[item.filename](data.decode('utf-8')).encode('utf-8')
+                dst.writestr(item.filename, data)
+
+    def test_diff_ignores_what_excel_rewrites_on_every_save(self):
+        patch = self.patch({'sheet': '試験結果', 'table': {'key': 'ケースID', 'rows': {'C-01': {'判定': {'from': 'NG', 'to': '既知NG'}}}}})
+        applied = self.dir / 'applied.xlsx'
+        self.assertEqual(run('apply', self.book, patch, '--out', applied)[0], 0)
+
+        def sheet(xml):
+            # The cursor moved to the edited cell, the view scrolled, the sheet is the selected tab,
+            # and the root element is serialized with its attributes in another order.
+            xml = xlsx_patch.re.sub(r'<selection\b[^>]*/>', '<selection pane="bottomLeft" activeCell="C3" sqref="C3"/>', xml)
+            xml = xlsx_patch.re.sub(r'<sheetView\b', '<sheetView tabSelected="1" zoomScale="85"', xml, count=1)
+            return xml
+
+        def workbook(xml):
+            xml = xlsx_patch.re.sub(r'<bookViews>.*?</bookViews>', '<bookViews><workbookView xWindow="240" yWindow="105" '
+                                    'windowWidth="28800" windowHeight="12300" activeTab="1"/></bookViews>', xml, flags=xlsx_patch.re.S)
+            xml = xlsx_patch.re.sub(r'<calcPr\b[^>]*/>', '', xml)
+            return xml.replace('</workbook>', '<calcPr calcId="191029"/></workbook>')
+
+        def content_types(xml):
+            head, _, rest = xml.partition('<Override')
+            overrides = ['<Override' + part for part in rest.split('<Override')]
+            overrides[-1] = overrides[-1].replace('</Types>', '')
+            return head + ''.join(reversed(overrides)) + '</Types>'
+
+        saved = self.dir / 'saved-by-excel.xlsx'
+        self.rewrite(applied, saved, **{'xl/worksheets/sheet1.xml': sheet, 'xl/workbook.xml': workbook,
+                                        '[Content_Types].xml': content_types})
+        code, log = run('diff', self.book, saved, '--expect', patch)
+        self.assertEqual(code, 0, log)
+
+        # What a person must not change by accident is still reported.
+        unfrozen = self.dir / 'unfrozen.xlsx'
+        self.rewrite(saved, unfrozen, **{'xl/worksheets/sheet1.xml': lambda xml: xlsx_patch.re.sub(r'<pane\b[^>]*/>', '', xml)})
+        code, log = run('diff', self.book, unfrozen, '--expect', patch)
+        self.assertEqual(code, 1, log)
+        self.assertIn('セル以外の定義', log)
+        renamed = self.dir / 'renamed.xlsx'
+        self.rewrite(saved, renamed, **{'xl/workbook.xml': lambda xml: xml.replace('name="画面項目定義"', 'name="画面項目"')})
+        self.assertEqual(run('diff', self.book, renamed, '--expect', patch)[0], 1)
+        named = self.dir / 'named.xlsx'
+        self.rewrite(saved, named, **{'xl/workbook.xml': lambda xml: xml.replace(
+            '</workbook>', '<definedNames><definedName name="範囲">試験結果!$A$1</definedName></definedNames></workbook>')})
+        code, log = run('diff', self.book, named, '--expect', patch)
+        self.assertEqual(code, 1, log)
+        self.assertIn('xl/workbook.xml', log)
+
+    def test_sheets_written_by_other_tools(self):
+        def other_tool(xml):
+            xml = xlsx_patch.re.sub(r'(<row\b[^>]*?) r="\d+"', r'\1', xml)  # rows without r (implicit numbering)
+            xml = xml.replace('<c r=', '<c\n  r=')                          # attributes on the next line
+            return xlsx_patch.re.sub(r' s="(\d+)"', r" s='\1'", xml)        # single-quoted attributes
+
+        other = self.dir / 'other-tool.xlsx'
+        self.rewrite(self.book, other, **{'xl/worksheets/sheet1.xml': other_tool})
+        with zipfile.ZipFile(other) as zf:
+            cells = xlsx_patch.read_cells(zf.read('xl/worksheets/sheet1.xml').decode(), xlsx_patch.shared_strings(zf))
+        self.assertEqual(cells['C3'][0], 'NG', 'a cell whose attributes start on a new line is not empty')
+        patch = self.patch({'sheet': '試験結果', 'table': {'key': 'ケースID', 'rows': {'C-01': {'判定': {'from': 'NG', 'to': '既知NG'}}}}})
+        code, log = run('apply', other, patch)
+        self.assertEqual(code, 0, log)
+        self.assertEqual(openpyxl.load_workbook(other)['試験結果']['C3'].value, '既知NG')
+
+    def test_line_breaks_are_normalized_and_control_characters_rejected(self):
+        patch = self.patch({'sheet': '画面項目定義', 'cells': {'C2': {'from': '20 文字以内', 'to': '40 文字以内\r\n（全角）'}}})
+        code, log = run('apply', self.book, patch)
+        self.assertEqual(code, 0, log)
+        self.assertEqual(self.values('画面項目定義')['C2'], '40 文字以内\n（全角）')
+        again = self.patch({'sheet': '画面項目定義', 'cells': {'C2': {'from': '40 文字以内\r\n（全角）', 'to': '50 文字以内'}}})
+        self.assertEqual(run('apply', self.book, again)[0], 0, 'from is compared after the same normalization')
+        before = self.book.read_bytes()
+        bad = self.patch({'sheet': '画面項目定義', 'cells': {'C2': {'from': '50 文字以内', 'to': '値\x01'}}})
+        code, log = run('apply', self.book, bad)
+        self.assertEqual(code, 2, log)
+        self.assertIn('制御文字', log)
+        self.assertEqual(self.book.read_bytes(), before)
+
+    def test_relative_sheet_targets_and_a_new_output_directory(self):
+        for target in ('../xl/worksheets/sheet1.xml', './worksheets/sheet1.xml', '/xl/worksheets/sheet1.xml'):
+            with self.subTest(target=target):
+                odd = self.dir / 'odd-rels.xlsx'
+                self.rewrite(self.book, odd, **{'xl/_rels/workbook.xml.rels': lambda xml, t=target: xml.replace(
+                    'Target="worksheets/sheet1.xml"', f'Target="{t}"').replace('Target="/xl/worksheets/sheet1.xml"', f'Target="{t}"')})
+                with zipfile.ZipFile(odd) as zf:
+                    self.assertEqual(xlsx_patch.sheet_parts(zf)['試験結果'], 'xl/worksheets/sheet1.xml')
+        patch = self.patch({'sheet': '試験結果', 'cells': {'C3': {'from': 'NG', 'to': '保留'}}})
+        out = self.dir / 'new' / 'dir' / 'out.xlsx'
+        code, log = run('apply', self.book, patch, '--out', out)
+        self.assertEqual(code, 0, log)
+        self.assertTrue(out.is_file())
+
 class RefTests(unittest.TestCase):
     def test_column_letters_round_trip(self):
         for index, letters in ((1, 'A'), (26, 'Z'), (27, 'AA'), (52, 'AZ'), (703, 'AAA')):
@@ -267,6 +366,15 @@ class RefTests(unittest.TestCase):
         with self.assertRaises(xlsx_patch.PatchError):
             xlsx_patch.split_ref('a1')
 
+
+class InlineStringTests(unittest.TestCase):
+    def test_phonetic_runs_are_not_cell_text(self):
+        xml = ('<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1">'
+               '<c r="A1" t="inlineStr"><is><t>東京</t><rPh sb="0" eb="2"><t>トウキョウ</t></rPh></is></c>'
+               '<c r="B1" t="inlineStr"><is><r><t>太字</t></r><r><t>と普通</t></r></is></c></row></sheetData></worksheet>')
+        cells = xlsx_patch.read_cells(xml, [])
+        self.assertEqual(cells['A1'][0], '東京')
+        self.assertEqual(cells['B1'][0], '太字と普通')
 
 if __name__ == '__main__':
     unittest.main()

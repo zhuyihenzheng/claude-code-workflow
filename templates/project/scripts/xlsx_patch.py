@@ -22,17 +22,21 @@ apply は、対象シートの XML の該当セルだけを書き換え、他の
 そのままコピーする。保存前に「指示したセルだけが、指示した値になった」ことを確認する。
 diff は 2 つのブックを比べ、変わったセルと、シート以外で変わったファイルを表示する。
 --expect を付けると、変更指示にない差分があれば終了コード 1 を返す（人が Excel で直した結果の確認用）。
-保存のたびに変わる情報（docProps の更新日時、計算チェーン、共有文字列の並び）は比較しない。セルの書式は
-スタイル番号ではなく、フォント・塗りつぶし・罫線・表示形式の定義そのものを比べる。画像・図形・テーマ・
-シート構成が変わった場合は差分として報告する。
+保存のたびに変わる情報（docProps の更新日時、計算チェーン、共有文字列の並び、選択中のセル・表示倍率・
+スクロール位置・アクティブなシート、ブックのウィンドウ情報、[Content_Types].xml の並び順）は比較しない。
+シートはセルのほか、列幅・結合・枠固定・フィルター・入力規則・条件付き書式・ハイパーリンク・保護・改ページ・
+図形の参照を比べる。セルの書式はスタイル番号ではなく、フォント・塗りつぶし・罫線・表示形式の定義そのものを
+比べる。画像・図形・テーマ・シート構成・名前の定義が変わった場合は差分として報告する。
 
-制限：数式セル・結合セルの左上以外には書き込まない。書き込む値は文字列。新しく作るセルに書式は付かない。
+制限：数式セル・結合セルの左上以外には書き込まない。書き込む値は文字列（改行は LF にそろえ、XML に書けない
+制御文字は拒否する）。新しく作るセルに書式は付かない。
 終了コード：0 = 成功／差分は指示どおり、1 = 指示にない差分がある、2 = 指示が適用できない・入力が不正。
 """
 import argparse
 import json
 import os
-from pathlib import Path, PurePosixPath
+from pathlib import Path
+import posixpath
 import re
 import sys
 import tempfile
@@ -44,6 +48,9 @@ NS_MAIN = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
 NS_REL = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
 ROW = re.compile(r'<row\b[^>]*?(?:/>|>.*?</row>)', re.S)
 CELL = re.compile(r'<c\b[^>]*?(?:/>|>.*?</c>)', re.S)
+NOT_XML = re.compile('[\x00-\x08\x0b\x0c\x0e-\x1f\ufffe\uffff]')
+T, R, IS = (f'{{{NS_MAIN}}}{tag}' for tag in ('t', 'r', 'is'))
+REL_TYPE_CALC_CHAIN = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/calcChain'
 
 
 class PatchError(Exception):
@@ -51,8 +58,13 @@ class PatchError(Exception):
 
 
 def attr(tag, name):
-    found = re.search(r'\b' + re.escape(name) + r'="([^"]*)"', tag)
-    return found.group(1) if found else None
+    found = re.search(r'\s' + re.escape(name) + r'''\s*=\s*(?:"([^"]*)"|'([^']*)')''', tag)
+    return None if found is None else found.group(1) if found.group(1) is not None else found.group(2)
+
+
+def tag_end(raw):
+    """Index just past the start tag (attribute values never contain '>' unescaped in OOXML from Excel)."""
+    return raw.index('>') + 1
 
 
 def split_ref(ref):
@@ -83,7 +95,8 @@ def sheet_parts(zf):
     targets = {}
     for rel in rels:
         target = rel.get('Target', '')
-        targets[rel.get('Id')] = target.lstrip('/') if target.startswith('/') else str(PurePosixPath('xl') / target)
+        # Absolute from the package root, or relative to xl/ (also "./worksheets/…" and "../xl/worksheets/…").
+        targets[rel.get('Id')] = posixpath.normpath(target.lstrip('/') if target.startswith('/') else posixpath.join('xl', target))
     book = ET.fromstring(zf.read('xl/workbook.xml'))
     return {sheet.get('name'): targets[sheet.get(f'{{{NS_REL}}}id')] for sheet in book.iter(f'{{{NS_MAIN}}}sheet')}
 
@@ -92,14 +105,15 @@ def shared_strings(zf):
     if 'xl/sharedStrings.xml' not in zf.namelist():
         return []
     root = ET.fromstring(zf.read('xl/sharedStrings.xml'))
-    texts = []
-    for si in root.iter(f'{{{NS_MAIN}}}si'):
-        # Direct <t> or rich-text runs <r><t>. Phonetic runs (<rPh>) hold furigana, not cell text.
-        parts = [child.text or '' if child.tag == f'{{{NS_MAIN}}}t'
-                 else ''.join(t.text or '' for t in child.iter(f'{{{NS_MAIN}}}t'))
-                 for child in si if child.tag in (f'{{{NS_MAIN}}}t', f'{{{NS_MAIN}}}r')]
-        texts.append(''.join(parts))
-    return texts
+    return [rich_text(si) for si in root.iter(f'{{{NS_MAIN}}}si')]
+
+
+def rich_text(node):
+    """Text of a shared or inline string: a direct <t> or rich-text runs <r><t>. Phonetic runs (<rPh>) are furigana."""
+    if node is None:
+        return ''
+    return ''.join(child.text or '' if child.tag == T else ''.join(t.text or '' for t in child.iter(T))
+                   for child in node if child.tag in (T, R))
 
 
 def style_table(zf):
@@ -137,20 +151,21 @@ def read_cells(xml, strings):
     for row in ROW.finditer(data.group(1) or ''):
         for cell in CELL.finditer(row.group(0)):
             raw = cell.group(0)
-            head = raw[:raw.index('>') + 1]
+            head = raw[:tag_end(raw)]
             ref = attr(head, 'r')
             if ref is None:
                 raise PatchError('番地（r 属性）のないセルがあります（対応していない形式のシートです）')
-            node = ET.fromstring(raw.replace('<c ', f'<c xmlns="{NS_MAIN}" ', 1))
+            # The cell is parsed on its own, so give it the sheet's default namespace (also when "<c" is followed by a newline).
+            node = ET.fromstring(re.sub(r'^<c\b', f'<c xmlns="{NS_MAIN}"', raw, count=1))
             kind = node.get('t')
             value = node.find(f'{{{NS_MAIN}}}v')
             if kind == 's' and value is not None:
                 text = strings[int(value.text)]
             elif kind == 'inlineStr':
-                text = ''.join(t.text or '' for t in node.iter(f'{{{NS_MAIN}}}t'))
+                text = rich_text(node.find(IS))
             else:
                 text = value.text or '' if value is not None else ''
-            cells[ref] = (text, attr(head, 's'), node.find(f'{{{NS_MAIN}}}f') is not None)
+            cells[ref] = (text, node.get('s'), node.find(f'{{{NS_MAIN}}}f') is not None)
     return cells
 
 
@@ -166,6 +181,11 @@ def merged_non_anchor(xml):
     return blocked
 
 
+def normalize_text(text):
+    """Line breaks as XML stores them (CRLF and CR become LF), so the written value reads back unchanged."""
+    return text.replace('\r\n', '\n').replace('\r', '\n')
+
+
 def plan_sheet(spec, cells, blocked):
     """Resolve one sheet's instructions to {ref: new text}. Raises PatchError without side effects."""
     sheet = spec['sheet']
@@ -179,9 +199,12 @@ def plan_sheet(spec, cells, blocked):
         new = change['to'] if isinstance(change, dict) else change
         if not isinstance(new, str):
             raise PatchError(f'{sheet}!{ref}（{label}）：書き込む値は文字列で指定してください')
+        new = normalize_text(new)
+        if (bad := NOT_XML.search(new)):
+            raise PatchError(f'{sheet}!{ref}（{label}）：Excel に書き込めない制御文字が含まれています（U+{ord(bad.group(0)):04X}）')
         if text_of(ref) == new:
             return  # already as instructed, so applying the same instructions twice is harmless
-        if isinstance(change, dict) and 'from' in change and text_of(ref) != change['from']:
+        if isinstance(change, dict) and 'from' in change and text_of(ref) != normalize_text(str(change['from'])):
             raise PatchError(f'{sheet}!{ref}（{label}）：現在の値が from と一致しません。'
                              f'from={change["from"]!r}、現在={text_of(ref)!r}')
         if cells.get(ref, ('', None, False))[2]:
@@ -242,7 +265,7 @@ def write_cells(xml, planned, cells):
         by_row.setdefault(split_ref(ref)[1], []).append((ref, text))
 
     def patch_row(row_xml, changes):
-        head_end = row_xml.index('>') + 1
+        head_end = tag_end(row_xml)
         head = row_xml[:head_end]
         if head.endswith('/>'):
             head, body, tail = head[:-2] + '>', '', '</row>'
@@ -251,23 +274,25 @@ def write_cells(xml, planned, cells):
         for ref, text in sorted(changes, key=lambda change: col_index(split_ref(change[0])[0])):
             style = cells.get(ref, ('', None, False))[1]
             new, column = cell_xml(ref, text, style), col_index(split_ref(ref)[0])
-            existing = next((c for c in CELL.finditer(body) if attr(c.group(0)[:c.group(0).index('>') + 1], 'r') == ref), None)
+            existing = next((c for c in CELL.finditer(body) if attr(c.group(0)[:tag_end(c.group(0))], 'r') == ref), None)
             if existing:
                 body = body[:existing.start()] + new + body[existing.end():]
                 continue
             # A new cell: keep column order, and drop the row's span hint, which would now be wrong.
             head = re.sub(r'\s+spans="[^"]*"', '', head)
             after = next((c for c in CELL.finditer(body)
-                          if col_index(split_ref(attr(c.group(0)[:c.group(0).index('>') + 1], 'r'))[0]) > column), None)
+                          if col_index(split_ref(attr(c.group(0)[:tag_end(c.group(0))], 'r'))[0]) > column), None)
             position = after.start() if after else len(body)
             body = body[:position] + new + body[position:]
         return head + body + tail
 
     data = re.search(r'<sheetData\b[^>]*?(/>|>(.*)</sheetData>)', xml, re.S)
     inner = data.group(2) or ''
-    pieces, last, seen = [], 0, set()
+    pieces, last, seen, number = [], 0, set(), 0
     for row in ROW.finditer(inner):
-        number = int(attr(row.group(0)[:row.group(0).index('>') + 1], 'r'))
+        # A row without r follows the previous row (OOXML allows the index to be omitted).
+        explicit = attr(row.group(0)[:tag_end(row.group(0))], 'r')
+        number = int(explicit) if explicit else number + 1
         # Rows that do not exist yet go in before the first later row.
         for missing in sorted(n for n in by_row if n < number and n not in seen):
             pieces.append(patch_row(f'<row r="{missing}"/>', by_row[missing]))
@@ -294,10 +319,65 @@ def write_cells(xml, planned, cells):
     return xml
 
 
-def outside_cells(xml):
-    """The sheet XML without the parts apply may touch: cell data, the dimension hint and row span hints."""
-    xml = re.sub(r'<sheetData\b[^>]*?(?:/>|>.*</sheetData>)', '<sheetData/>', xml, flags=re.S)
-    return re.sub(r'<dimension\b[^>]*/>', '', xml)
+def canonical(element):
+    """An element in a form that does not depend on attribute order, prefixes or indentation."""
+    return ET.canonicalize(ET.tostring(element, encoding='unicode'), strip_text=True)
+
+
+def sheet_structure(xml):
+    """What a person can change on a sheet besides the cells, without view state that every save rewrites
+    (selected cell, scroll position, zoom, selected tab) and without serialization details."""
+    root = ET.fromstring(xml)
+
+    def q(tag):
+        return f'{{{NS_MAIN}}}{tag}'
+
+    def number(value):
+        return round(float(value), 2) if value not in (None, '') else None
+
+    columns = {}
+    for col in root.iter(q('col')):
+        low, high = int(col.get('min', '1')), min(int(col.get('max', col.get('min', '1'))), 16384)
+        setting = (number(col.get('width')) if col.get('customWidth') in ('1', 'true') or col.get('width') else None,
+                   col.get('hidden') in ('1', 'true'))
+        columns.update((index, setting) for index in range(low, high + 1))
+    panes = [(number(p.get('xSplit')), number(p.get('ySplit')), p.get('state', 'split')) for p in root.iter(q('pane'))]
+    merges = sorted(m.get('ref') for m in root.iter(q('mergeCell')))
+    others = sorted(canonical(node) for name in ('autoFilter', 'dataValidations', 'conditionalFormatting', 'hyperlinks',
+                                                  'sheetProtection', 'rowBreaks', 'colBreaks', 'drawing', 'legacyDrawing',
+                                                  'tableParts') for node in root.iter(q(name)))
+    return {'columns': columns, 'panes': panes, 'merges': merges, 'others': others}
+
+
+def workbook_structure(xml):
+    """Sheets, defined names and the date system; not the window, calculation or file-version state Excel rewrites."""
+    root = ET.fromstring(xml)
+    sheets = [(s.get('name'), s.get('state', 'visible')) for s in root.iter(f'{{{NS_MAIN}}}sheet')]
+    names = sorted(canonical(n) for n in root.iter(f'{{{NS_MAIN}}}definedName'))
+    pr = root.find(f'{{{NS_MAIN}}}workbookPr')
+    return {'sheets': sheets, 'names': names, 'date1904': pr is not None and pr.get('date1904') in ('1', 'true')}
+
+
+def part_signature(name, data):
+    """What to compare for a part outside the sheets, or None when every save may rewrite it."""
+    if name.startswith('docProps/') or name in ('xl/sharedStrings.xml', 'xl/calcChain.xml', 'xl/styles.xml'):
+        return None  # metadata and calculation chain; cell text and styles are judged per cell
+    if name == 'xl/workbook.xml':
+        return workbook_structure(data)
+    if name == '[Content_Types].xml':
+        root = ET.fromstring(data)
+        return sorted((e.get('Extension') or e.get('PartName'), e.get('ContentType')) for e in root
+                      if e.get('PartName') != '/xl/calcChain.xml')
+    if name.endswith('.rels') or name.endswith('.xml'):
+        try:
+            root = ET.fromstring(data)
+        except ET.ParseError:
+            return data
+        if name == 'xl/_rels/workbook.xml.rels':
+            return sorted((rel.get('Type'), rel.get('Target'), rel.get('TargetMode')) for rel in root
+                          if rel.get('Type') != REL_TYPE_CALC_CHAIN)
+        return canonical(root)
+    return data
 
 
 def load_specs(path):
@@ -346,6 +426,7 @@ def apply(book, specs, out=None, dry_run=False, log=print):
         log(f'{sum(len(p[1]) for p in plan.values())} セルを変更します（--dry-run のため書き込んでいません）')
         return 0
     target = Path(out or book)
+    target.parent.mkdir(parents=True, exist_ok=True)
     handle, temp = tempfile.mkstemp(suffix='.xlsx', dir=str(target.parent))
     os.close(handle)
     try:
@@ -383,14 +464,14 @@ def compare(before, after, expected=None):
             index = int(index or 0)
             return table[index] if index < len(table) else index
         for name in sorted(set(names_a) | set(names_b)):
+            volatile = name.startswith('docProps/') or name == 'xl/calcChain.xml'
             if name not in names_a or name not in names_b:
-                problems.append(f'ファイルの{"追加" if name not in names_a else "削除"}：{name}')
+                if not volatile:
+                    problems.append(f'ファイルの{"追加" if name not in names_a else "削除"}：{name}')
                 continue
             if name not in sheet_of:
-                # Rewritten on every save, or judged through the cells: metadata, calculation chain,
-                # shared strings (cell text) and the style table (resolved per cell below).
-                volatile = name.startswith('docProps/') or name in ('xl/sharedStrings.xml', 'xl/calcChain.xml', 'xl/styles.xml')
-                if a.read(name) != b.read(name) and not volatile:
+                data_a, data_b = a.read(name), b.read(name)
+                if data_a != data_b and part_signature(name, data_a) != part_signature(name, data_b):
                     problems.append(f'シート以外のファイルが変わっています：{name}')
                 continue
             xml_a, xml_b = a.read(name).decode('utf-8'), b.read(name).decode('utf-8')
@@ -412,7 +493,7 @@ def compare(before, after, expected=None):
             for ref, text in wanted.items():
                 if cells_b.get(ref, ('', None, False))[0] != text:
                     problems.append(f'指示どおりになっていません：{sheet_of[name]}!{ref}（期待 {text!r}、実際 {cells_b.get(ref, ("",))[0]!r}）')
-            if outside_cells(xml_a) != outside_cells(xml_b):
+            if sheet_structure(xml_a) != sheet_structure(xml_b):
                 problems.append(f'セル以外の定義（列幅・結合・枠固定など）が変わっています：{sheet_of[name]}')
         for name in expected or {}:
             if name not in names_b:
