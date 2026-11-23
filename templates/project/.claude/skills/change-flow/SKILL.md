@@ -64,5 +64,5 @@ description: 既存機能の改修（仕様変更・不具合修正）を、設�
 
 - `./mvnw verify` と `python scripts/guard.py` を実行する。
 - 画面の操作や表示を変えた場合は、`docs/feature-map/` の該当する機能ファイルを同じ変更で更新する。
-- code-reviewer サブエージェントに、比較元のコミット、diff、変更点の一覧、テスト結果、guard の出力、`結果一覧.md` のパスを渡す。
+- `REVIEW.md` の基準でレビューを受ける（Claude Code では code-reviewer サブエージェント、GitHub Copilot ではコードレビュー）。比較元のコミット、diff、変更点の一覧、テスト結果、guard の出力、`結果一覧.md` のパスを渡す。
 - 報告には、変更点の一覧、修正した設計書の箇所、追加・修正したテストとケース ID、各コマンドの結果、未実施の検証とその理由を含める。

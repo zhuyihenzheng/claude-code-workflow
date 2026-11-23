@@ -1,0 +1,52 @@
+name: Copilot Setup Steps
+
+# 任意で有効化する。GitHub Copilot のクラウドエージェントとコードレビューが作業を始める前に、依存関係を用意する。
+# 使用する場合は copilot-setup-steps.yml に名前を変え、デフォルトブランチにマージする（マージ前は使われない）。
+# ジョブ名は copilot-setup-steps 固定。変更できるのは steps / permissions / runs-on / services / snapshot / timeout-minutes だけ。
+# ここで実行する処理には Copilot のファイアウォールが適用されないため、ダウンロードはここで済ませる。
+# 途中のステップが失敗すると残りは実行されないため、失敗しにくいものから順に並べる。
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/copilot-setup-steps.yml
+  pull_request:
+    paths:
+      - .github/workflows/copilot-setup-steps.yml
+
+jobs:
+  copilot-setup-steps:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      # scripts/xlsx2ai.py（Excel 設計書の変換）が使う。guard.py などほかのスクリプトは標準ライブラリだけで動く。
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Python tools for Excel design documents
+        run: python -m pip install "exstruct==0.9.1" "excel2md==2.3.0"
+      # 画面の検証（scripts/htmx-check.mjs、screen-tests/）が使うブラウザー。バージョンは screen-tests/package.json と同じにする。
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Playwright and Chromium
+        run: |
+          npm install --no-save --no-package-lock playwright@1.65.1
+          npx playwright install --with-deps chromium
+      - name: Screen test framework
+        if: hashFiles('screen-tests/package.json') != ''
+        working-directory: screen-tests
+        run: npm install --no-audit --no-fund
+      # Maven の依存関係とプラグインを取得する（テストは実行しない）。JDK のバージョンはプロジェクトに合わせる。
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: Maven dependencies
+        run: ./mvnw -B -q -DskipTests dependency:go-offline

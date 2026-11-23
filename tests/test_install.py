@@ -56,7 +56,7 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertFalse(workflows.exists())
         self.assertRegex(out, r'optional\s+\.github/workflows/claude\.yml\s+\(.*--with-workflows')
-        self.assertEqual(len([line for line in out.splitlines() if line.startswith('optional') and '--with-workflows' in line]), 3)
+        self.assertEqual(len([line for line in out.splitlines() if line.startswith('optional') and '--with-workflows' in line]), 4)
         self.assertEqual({k for rel, k in self.kinds().items() if rel.startswith('.github/workflows/')}, {'optional'})
         self.assertEqual(set(self.kinds().values()), {'skip', 'optional'})
         run('project', self.target, '--apply', '--with-workflows')
@@ -284,6 +284,8 @@ class InstallTests(unittest.TestCase):
         (self.target / 'docs/feature-map/S01-order-new.md').write_text('# S01 注文登録\n', encoding='utf-8')
         (self.target / 'pom.xml').write_text('<project><artifactId>archunit-junit5</artifactId></project>', encoding='utf-8')
         run('project', self.target, '--apply', '--with-archunit')
+        self.assertRegex(out, r'warn\s+no CODEOWNERS')
+        (self.target / '.github/CODEOWNERS').write_text('/config/guard/ @org/leads\n', encoding='utf-8')
         code, out, _ = run('doctor', self.target)
         self.assertRegex(out, r'ok\s+ArchitectureTest\.java defines the 3 ArchUnit rule\(s\)')
         self.assertEqual(code, 0, out)
@@ -363,6 +365,18 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(found["AGENTS.md tags ArchUnit rules missing from ArchitectureTest.java: ['no_field_injection']"], 'fail')
         self.assertEqual(found["AGENTS.md tags PMD rules missing from config/pmd/jsp-ruleset.xml: ['NoUnsanitizedJSPExpression']"],
                          'fail')
+
+    def test_doctor_checks_that_a_person_owns_the_guard_rules(self):
+        run('project', self.target, '--apply')
+        example = (self.target / '.github/CODEOWNERS.example').read_text(encoding='utf-8')
+        owners = self.target / '.github/CODEOWNERS'
+        owners.write_text(example, encoding='utf-8')
+        self.assertEqual(self.doctor()['.github/CODEOWNERS still has the @OWNER placeholder'], 'fail')
+        owners.write_text(example.replace('@OWNER', '@org/leads'), encoding='utf-8')
+        self.assertEqual(self.doctor()['.github/CODEOWNERS covers config/guard/'], 'ok')
+        owners.write_text('/src/ @org/devs\n', encoding='utf-8')
+        self.assertTrue(any(m.startswith('.github/CODEOWNERS has no owner for /config/guard/') and lv == 'warn'
+                            for m, lv in self.doctor().items()))
 
     def test_doctor_flags_tracked_local_files_and_writes_nothing(self):
         git = shutil.which('git')

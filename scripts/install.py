@@ -345,6 +345,7 @@ def doctor(target):
 
     doctor_guard(target, agents, add)
     doctor_structure(target, agents, add)
+    doctor_codeowners(target, add)
 
     git = shutil.which('git')
     if git and (target / '.git').exists():
@@ -434,6 +435,24 @@ def doctor_structure(target, agents, add):
     missing = sorted(name for name in pmd_rules if '/' + name + '"' not in text)
     add('fail' if missing else 'ok', f'AGENTS.md tags PMD rules missing from config/pmd/jsp-ruleset.xml: {missing}'
         if missing else f'PMD runs the {len(pmd_rules)} JSP rule(s) AGENTS.md tags')
+
+
+def doctor_codeowners(target, add):
+    """Changes to guard rules, the baseline and AI rules should need a person's approval (Copilot has no ask rules)."""
+    path = next((target / p for p in ('.github/CODEOWNERS', 'CODEOWNERS', 'docs/CODEOWNERS') if (target / p).is_file()), None)
+    if path is None:
+        add('warn', 'no CODEOWNERS: changes to guard rules, the baseline and AI rules need no human approval '
+                    '(see .github/CODEOWNERS.example; Copilot is not bound by .claude/settings.json)')
+        return
+    rules = [line.split() for line in path.read_text(encoding='utf-8', errors='replace').splitlines()
+             if line.strip() and not line.lstrip().startswith('#')]
+    if any('@OWNER' in parts for parts in rules):
+        add('fail', f'{path.relative_to(target).as_posix()} still has the @OWNER placeholder')
+        return
+    covered = any(parts[0] in ('*', '/config/', '/config/guard/', 'config/guard/', '/config/guard/**') for parts in rules)
+    add('ok' if covered else 'warn', f'{path.relative_to(target).as_posix()} covers config/guard/' if covered
+        else f'{path.relative_to(target).as_posix()} has no owner for /config/guard/: guard rules and the baseline '
+             'can change without a required reviewer')
 
 
 def main(argv=None):

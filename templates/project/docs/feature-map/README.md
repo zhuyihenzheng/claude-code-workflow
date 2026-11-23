@@ -1,6 +1,6 @@
 # 機能マップ
 
-利用者から見た機能の一覧と、各機能を実際に動かして確認する手順である。人もエージェントも、画面と機能はここの名称と機能 ID で呼ぶ。作成と更新の手順は `.claude/skills/feature-map/SKILL.md` に記載している（Claude Code では `feature-map` skill）。
+利用者から見た機能の一覧と、各機能を実際に動かして確認する手順である。人もエージェントも、画面と機能はここの名称と機能 ID で呼ぶ。作成と更新の手順は `.claude/skills/feature-map/SKILL.md` に記載している（Claude Code と GitHub Copilot はどちらも `feature-map` skill として読み込む）。
 
 ## 共通の前提
 

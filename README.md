@@ -83,6 +83,9 @@ CLAUDE.md                         @AGENTS.md + Claude Code 专属补充
 .github/copilot-instructions.md   Copilot 入口摘要
 .github/instructions/             由 rules 生成的 Copilot 路径指令
 .github/pull_request_template.md  验证证据在前的 PR 模板
+.github/CODEOWNERS.example        改名后：guard 规则与基线、AI 规则的修改必须由指定的人批准（对 Copilot 也生效）
+REVIEW.md                         评审顺序与观点：Claude 的评审子代理、Copilot code review 与人审共用
+config/copilot/                   Copilot 的内容排除清单（与 settings 的 deny 一致）与设置说明
 config/guard/rules.json           guard 规则：每条带修法、来源与真实错误样例（起始 10 条）
 config/pmd/jsp-ruleset.xml        PMD 的 JSP 转义检查（NoUnsanitizedJSPExpression）
 config/quality/pom-snippet.xml    加进 pom.xml 的 ArchUnit 依赖与 maven-pmd-plugin，二者都在 ./mvnw verify 中运行

@@ -10,7 +10,7 @@
 | `../CLAUDE.md` | 1 行目で `@AGENTS.md` を取り込み、Claude Code 固有の補足だけを置く | 毎セッション読み込まれるため、人向けの説明は書かない |
 | [settings.json](settings.json) | チーム共有の権限（allow / deny / ask） | 個人の上書きは `settings.local.json`（リポジトリ管理対象外）に置く |
 | `rules/*.md` | `paths:` に一致するファイルを扱うときだけ読み込まれるルール | 編集後に `python3 scripts/sync_rules.py` を実行し、Copilot 用の `.github/instructions/` を再生成する |
-| `agents/code-reviewer.md` | 読み取り専用のレビュー用サブエージェント | Bash を持たないため、呼び出し側が diff を渡す |
+| `agents/code-reviewer.md` | 読み取り専用のレビュー用サブエージェント | Bash を持たないため、呼び出し側が diff を渡す。確認の基準は `../REVIEW.md`（Copilot のコードレビューと共通） |
 | `skills/spring-endpoint/` | エンドポイント／画面フラグメント追加の標準手順 | TODO の参考パスをプロジェクトの実例に置き換える |
 | `skills/change-flow/` | 改修の標準手順（設計書 → 実装 → 単体テスト → 画面試験 → 試験書） | 画面試験を導入していない場合は、該当ステップを `htmx-check.mjs` で代替する |
 | `skills/correct/` | 修正指示を設計・型・guard のルール・テストに変える手順 | ルールは `../config/guard/rules.json` に追加する |
@@ -19,6 +19,8 @@
 | `../config/pmd/jsp-ruleset.xml` | PMD による JSP のエスケープ漏れ検査 | `../config/quality/pom-snippet.xml` の maven-pmd-plugin を pom.xml に追加すると `./mvnw verify` で実行される |
 | `hooks/verify-stop.py` | Stop hook の参考サンプル（**未登録**） | 下記「Hooks」を参照 |
 | `../.mcp.json` | MCP サーバー（Context7、Playwright） | 使用しないサーバーは削除し、認証情報は環境変数で渡す |
+
+GitHub Copilot と併用する場合に Copilot へ効くもの・効かないもの、リポジトリの設定画面で行う作業は `../config/copilot/README.md` に記載している。
 
 ## 権限（settings.json）
 

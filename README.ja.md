@@ -60,6 +60,9 @@ CLAUDE.md                         @AGENTS.md と Claude Code 固有の補足
 .github/copilot-instructions.md   Copilot 向けの要約
 .github/instructions/             rules から生成する Copilot のパス別指示
 .github/pull_request_template.md  検証の証跡を先頭に置く PR テンプレート
+.github/CODEOWNERS.example        名前を変えると、guard のルールとベースライン、AI へのルールの変更に指定した人の承認が必要になる（Copilot にも効く）
+REVIEW.md                         レビューの順序と観点（Claude のレビュー用サブエージェント、Copilot のコードレビュー、人が共通で使う）
+config/copilot/                   Copilot のコンテンツ除外（settings の deny と同じ対象）と設定の説明
 config/guard/rules.json           guard のルール（直し方、由来、実際の誤りの例を持つ。初期 10 件）
 config/pmd/jsp-ruleset.xml        PMD による JSP のエスケープ漏れ検査
 config/quality/pom-snippet.xml    pom.xml に追加する ArchUnit と maven-pmd-plugin（どちらも ./mvnw verify で実行される）
