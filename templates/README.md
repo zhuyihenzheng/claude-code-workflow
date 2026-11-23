@@ -85,7 +85,10 @@ node scripts/htmx-check.mjs --storage-state target/htmx-check/state.json --clear
 - **增长规则**：人纠正 agent 后，skill [`correct`](project/.claude/skills/correct/SKILL.md) 按“设计 → 类型 → guard 规则 → 测试 → 文字”的顺序落地，并在 AGENTS.md 标注。
 - **功能地图**：[`project/docs/feature-map/`](project/docs/feature-map/README.md) 与 skill [`feature-map`](project/.claude/skills/feature-map/SKILL.md)。一个功能一个文件，写可执行的命令与合格结果；code-reviewer 与 [PR 模板](project/.github/pull_request_template.md)从这些证据开始。
 
-背景、起始规则一览与刻意不做的事见 [15 · 纠正变成检查](../docs/15-纠正变成检查.md)。
+- **ArchUnit 与 PMD**（`./mvnw verify` 里运行）：guard 只做文本匹配。看依赖关系的规则放 [`ArchitectureTest.java`](project/src/test/java/ArchitectureTest.java)（`--with-archunit` 安装；默认包、按 Spring 注解判层），JSP 的转义检查放 [`config/pmd/jsp-ruleset.xml`](project/config/pmd/jsp-ruleset.xml)。安装脚本不改 `pom.xml`，按 [`config/quality/pom-snippet.xml`](project/config/quality/pom-snippet.xml) 手动加入。既有违规多时：ArchUnit 用 `FreezingArchRule`，PMD 把 `maxAllowedViolations` 设为当前件数，之后只减不增。`doctor` 会核对 AGENTS.md 里 `〔ArchUnit: …〕`、`〔PMD: …〕` 标注的规则是否真的在运行。
+- **PR 上的注释**：CI 示例用 `guard.py --format github`，违规显示在 PR diff 的对应行。
+
+背景、起始规则一览、结合了哪些开源项目、刻意不做的事见 [15 · 纠正变成检查](../docs/15-纠正变成检查.md)。
 
 ## 画面试验与 Excel 修改
 

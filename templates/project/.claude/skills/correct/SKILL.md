@@ -19,7 +19,11 @@ description: 人から修正を指示されたとき、または同じレビュ�
 
 1. **設計で消す**：正しい方法を 1 つにする（共通の Service、タグ、ユーティリティを用意し、古い方法を同じ変更で削除する）。パッケージの可視性で誤った依存を書けなくする。
 2. **型とコンパイルで消す**：enum、値オブジェクト、`final`、コンストラクタの引数で、誤った状態を表現できなくする。
-3. **guard のルールにする**：`config/guard/rules.json` に追加する（3 を参照）。パッケージ間の依存のような構造の規則を、プロジェクトが ArchUnit などで検査している場合は、そのテストに追加する。
+3. **検査ツールのルールにする**：誤りの種類で置き場所を選ぶ。
+   - クラス間・層間の依存（どの層がどの層を使うか、どのアノテーションを禁止するか）：`src/test/java/ArchitectureTest.java`（ArchUnit）に `@ArchTest` のルールを追加し、`.because(...)` に直し方を書く。import 文を書かない同じパッケージ内の参照も止められる。
+   - JSP の構文上の誤り（エスケープ漏れなど）：`config/pmd/jsp-ruleset.xml` に PMD の既存ルールを追加する（ルール一覧は PMD の JSP Rule Index）。`message` で直し方を上書きする。
+   - それ以外の書き方の誤り（特定の API の呼び出し、コメント、テストの無効化など）：`config/guard/rules.json`（3 を参照）。
+   ArchUnit と PMD は `./mvnw verify` で実行される。プロジェクトに未導入の場合（`config/quality/pom-snippet.xml` が pom.xml にない）は、guard のルールにして、導入を報告で提案する。
 4. **テストにする**：振る舞いの誤りは、壊れたら失敗するテストにする。内部実装が変わっただけで失敗するテストにしない。
 5. **文章にする**：判断が必要で機械化できないものだけ、AGENTS.md（チーム共通ルール）または `.claude/rules/` に短く書き、誤りの例を 1 つ添える。
 
@@ -50,16 +54,21 @@ description: 人から修正を指示されたとき、または同じレビュ�
 ## 4. 既存コードの違反を片付ける
 
 - 既存の違反が少なければ、同じ PR の別コミットで直す。古いパターンが残っていると、次のエージェントがそれを手本にする。
-- 多い場合は、件数とファイルを報告し、人に `python scripts/guard.py --init-baseline` の実行を依頼する（確認が入る）。エージェントはベースラインを編集せず、`guard:allow` も書かない。登録後、件数は縮小だけができる。
+- 多い場合は、件数とファイルを報告し、人に既存の違反の受け入れを依頼する。エージェントは自分で受け入れない。
+  - guard：`python scripts/guard.py --init-baseline`（確認が入る）。エージェントはベースラインを編集せず、`guard:allow` も書かない。
+  - ArchUnit：ルールを `FreezingArchRule.freeze(...)` で包み、人が `./mvnw test -Dtest=ArchitectureTest -Darchunit.freeze.store.default.allowStoreCreation=true` を一度実行して記録をコミットする。
+  - PMD：人が pom.xml の `maxAllowedViolations` を現在の件数にする。
+  いずれも、以後は件数が縮小だけできる状態にする。
+- 同じ形の修正が大量にある場合は、手で直さず、一括変換の道具（スクリプト、IDE の構造置換、OpenRewrite のレシピなど）を作るか使い、変換の前後で guard とテストが同じ結果になることを示す。OpenRewrite の Spring 向け・静的解析向けレシピは Moderne Source Available License であり、OSI のオープンソースではないため、組織の利用条件を確認してから使う。
 
 ## 5. 効くことを証明する
 
 - 誤りがある状態（直す前のコミット、または誤りを一時的に戻した作業ツリー）で guard が終了コード 1 になり、直した状態で 0 になることを確認し、両方の出力を報告に貼る。
-- CI の guard ステップと同じコマンドを使う。
+- CI と同じコマンド（`python scripts/guard.py`、`./mvnw verify`）を使う。ArchUnit と PMD の失敗も、出力の理由（`because` や `PMD Failure` の行）をそのまま貼る。
 
 ## 6. 台帳を更新する
 
-- AGENTS.md の該当する規約の末尾に `〔guard: <id>〕` を付ける。該当する規約がなければ、1 行で追加してタグを付ける。
+- AGENTS.md の該当する規約の末尾に `〔guard: <id>〕`、`〔ArchUnit: <フィールド名>〕`、`〔PMD: <ルール名>〕` のいずれかを付ける。該当する規約がなければ、1 行で追加してタグを付ける。
 - エラーメッセージだけで十分になった文章のルールは削除する。AGENTS.md は 150 行未満に保つ。
 - 誤りが起きなくなった（設計で消えた）ルールは、ルールごと削除してよい。
 

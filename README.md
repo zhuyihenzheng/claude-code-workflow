@@ -59,6 +59,7 @@ python3 scripts/install.py project /path/to/your-project          # 预演：只
 python3 scripts/install.py project /path/to/your-project --diff   # 预演，并打印与已有文件的差异
 python3 scripts/install.py project /path/to/your-project --apply  # 写入
 python3 scripts/install.py project /path/to/your-project --apply --with-screen-tests   # 连同画面试验（midscene-poc）
+python3 scripts/install.py project /path/to/your-project --apply --with-archunit        # 连同 ArchUnit 分层测试（需按 config/quality/pom-snippet.xml 改 pom）
 python3 scripts/install.py doctor /path/to/your-project           # 导入后检查：TODO 是否填完、规则是否同步、guard 是否通过、配置有无风险
 python3 scripts/install.py user --apply                           # 个人级 skills → ~/.claude/skills
 ```
@@ -83,6 +84,8 @@ CLAUDE.md                         @AGENTS.md + Claude Code 专属补充
 .github/instructions/             由 rules 生成的 Copilot 路径指令
 .github/pull_request_template.md  验证证据在前的 PR 模板
 config/guard/rules.json           guard 规则：每条带修法、来源与真实错误样例（起始 10 条）
+config/pmd/jsp-ruleset.xml        PMD 的 JSP 转义检查（NoUnsanitizedJSPExpression）
+config/quality/pom-snippet.xml    加进 pom.xml 的 ArchUnit 依赖与 maven-pmd-plugin，二者都在 ./mvnw verify 中运行
 docs/feature-map/README.md        功能地图的书式：一个功能一个文件，命令与合格结果
 .mcp.json                         Context7 + 隔离的 Playwright
 scripts/sync_rules.py             rules → Copilot 指令的同步与 --check
@@ -91,6 +94,7 @@ scripts/htmx-check.mjs            真实浏览器验证 HTMX 片段替换（含�
 scripts/xlsx2ai.py                Excel 设计书 → 按 sheet 拆分的 JSON / Mermaid
 scripts/xlsx_patch.py             按变更指示改 Excel：只动指定的单元格，其余逐字节不变
 screen-tests/                     （可选）画面试验：固定版本的 midscene-poc
+src/test/java/ArchitectureTest.java （可选，--with-archunit）按编译后的依赖检查分层与字段注入
 .gitignore / .gitattributes       补充缺失规则
 ```
 
@@ -110,6 +114,7 @@ python3 -m unittest discover -s tests -v
 | 画面试验：示例应用上从 GitHub 按 SHA 安装框架并实际运行；`xlsx_patch.py` 改写运行生成的试验结果（Ubuntu） | 真实业务项目上的画面试验；`change-flow` 在真实改修任务上的表现 |
 | Stop hook 参考样例：模拟与真实 Maven（仅 POSIX） | Copilot 各入口是否读取 AGENTS.md 与路径指令 |
 | `guard.py`：单元测试（三平台）；示例应用上通过、注入真实错误后报出修法；功能地图里的命令在运行中的应用上逐条执行（Ubuntu） | 起始规则在真实业务代码上的误报率；`correct` 在真实纠正上的表现 |
+| ArchUnit 与 PMD：示例应用的 `./mvnw verify`；同包引用 guard 查不到而 ArchUnit 失败；未转义的 EL 使 PMD 失败（Ubuntu） | 多模块、既有大量违规的项目上的导入（Freezing 与 `maxAllowedViolations`） |
 
 本地测试不调用 Claude API；缺少 Playwright 时浏览器测试会跳过，CI 中强制执行。逐轮的问题与修复记录见 [09 · 审查与修复](docs/09-审查与修复.md)，Windows 搭建见 [02 · 基础搭建](docs/02-基础搭建.md#6-windows-两条路径)。
 

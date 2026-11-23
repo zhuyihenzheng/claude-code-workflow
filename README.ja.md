@@ -28,6 +28,7 @@ python3 scripts/install.py project /path/to/your-project          # 予行：計
 python3 scripts/install.py project /path/to/your-project --diff   # 予行：既存ファイルとの差分も表示する
 python3 scripts/install.py project /path/to/your-project --apply  # 書き込む
 python3 scripts/install.py project /path/to/your-project --apply --with-screen-tests   # 画面試験（midscene-poc）も導入する
+python3 scripts/install.py project /path/to/your-project --apply --with-archunit        # ArchUnit のレイヤー検査も導入する（pom.xml への追加が必要）
 python3 scripts/install.py doctor /path/to/your-project           # 導入後の確認：TODO の残り、ルールの同期、guard の結果、設定上のリスク
 ```
 
@@ -60,6 +61,8 @@ CLAUDE.md                         @AGENTS.md と Claude Code 固有の補足
 .github/instructions/             rules から生成する Copilot のパス別指示
 .github/pull_request_template.md  検証の証跡を先頭に置く PR テンプレート
 config/guard/rules.json           guard のルール（直し方、由来、実際の誤りの例を持つ。初期 10 件）
+config/pmd/jsp-ruleset.xml        PMD による JSP のエスケープ漏れ検査
+config/quality/pom-snippet.xml    pom.xml に追加する ArchUnit と maven-pmd-plugin（どちらも ./mvnw verify で実行される）
 docs/feature-map/README.md        機能マップの書式（1 機能 1 ファイル、コマンドと合格条件）
 .mcp.json                         Context7 と Playwright（--isolated）
 scripts/sync_rules.py             rules から Copilot の指示を生成し、--check で差分を検出する
@@ -68,6 +71,7 @@ scripts/htmx-check.mjs            実ブラウザーで HTMX のフラグメン�
 scripts/xlsx2ai.py                Excel 設計書をシート単位の JSON／Mermaid に変換する
 scripts/xlsx_patch.py             変更指示どおりに Excel を書き換える（指示したセル以外は変更しない）
 screen-tests/                     （任意）画面試験。バージョンを固定した midscene-poc を使用する
+src/test/java/ArchitectureTest.java （任意、--with-archunit）コンパイル済みの依存関係でレイヤーとフィールドインジェクションを検査する
 ```
 
 ## 検証範囲
@@ -79,6 +83,7 @@ screen-tests/                     （任意）画面試験。バージョンを�
 | 導入 → `./mvnw verify` → 画面検証（Spring Boot + JSP + HTMX のサンプルアプリ、Ubuntu） | Claude Code のセッションでの実際の読み込み状況、GitHub App、有料の Action |
 | バージョンを固定した Playwright MCP／DBHub の起動とツール一覧の取得、workflow の actionlint | Copilot の各機能が AGENTS.md とパス別指示を読み込むかどうか |
 | `guard.py` の単体テスト（3 OS）、サンプルアプリでの合格・実際の誤りの検出、機能マップのコマンドの実行（Ubuntu） | 初期ルールの業務コードでの誤検知率、`correct` の実際の修正指示での動き |
+| ArchUnit と PMD：サンプルアプリの `./mvnw verify`、guard では見えない同一パッケージの参照と、エスケープしていない EL の検出（Ubuntu） | マルチモジュールや既存の違反が多いプロジェクトへの導入 |
 
 ```bash
 python3 -m pip install -r requirements-dev.txt     # Python 3.11+

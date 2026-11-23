@@ -5,6 +5,7 @@
     python3 scripts/guard.py --list               # ルールの一覧
     python3 scripts/guard.py --update-baseline    # ベースラインを現在の件数まで縮小する（増やさない）
     python3 scripts/guard.py --init-baseline      # ベースライン未登録のルールについて、既存の違反を受け入れる（人が実行する）
+    python3 scripts/guard.py --format github      # GitHub Actions で、違反を PR の該当行に注釈として表示する
 
 ルールは config/guard/rules.json、ルール導入時点の既存違反は config/guard/baseline.json に置く。
 ベースラインは縮小だけができる。新しい違反は件数が増えたファイルとして検出する。
@@ -315,6 +316,16 @@ def shrink(baseline, counts, rule_ids):
     return shrunk, removed
 
 
+def annotate(level, path, line, title, message):
+    def data(value):
+        return value.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+
+    def prop(value):
+        return data(value).replace(':', '%3A').replace(',', '%2C')
+
+    print(f'::{level} file={prop(path)},line={line},title={prop(title)}::{data(message)}')
+
+
 def print_rules(rules, baseline):
     for rule in rules:
         state = ('ベースライン未登録' if baseline is None or rule.id not in baseline
@@ -338,6 +349,8 @@ def main(argv=None):
     group.add_argument('--update-baseline', action='store_true', help='ベースラインを現在の件数まで縮小する')
     group.add_argument('--init-baseline', action='store_true',
                        help='ベースライン未登録のルールについて既存の違反を受け入れる（人が実行する）')
+    parser.add_argument('--format', choices=('text', 'github'), default='text',
+                        help='github：GitHub Actions の注釈（::error）も出力する')
     parser.add_argument('--today', help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
 
@@ -387,12 +400,18 @@ def main(argv=None):
     for rule_id, path, number, source, allowed, now in failing:
         message = next(r.message for r in rules if r.id == rule_id)
         extra = f'（このファイルのベースライン {allowed} 件に対して {now} 件）' if allowed else ''
+        if args.format == 'github':
+            annotate('error', path, number, f'guard {rule_id}', message + extra)
         print(f'{path}:{number}: [{rule_id}] {message}{extra}')
         print(f'    {source[:160]}')
     for rule_id, path, number, problem in allow_problems:
+        if args.format == 'github':
+            annotate('error', path, number, f'guard {rule_id}', problem)
         print(f'{path}:{number}: [{rule_id}] {problem}')
     for path, allow in allows:
         if allow.problem is None and not allow.used:
+            if args.format == 'github':
+                annotate('warning', path, allow.line, 'guard', f'使われていない例外です（{allow.rule_id}）')
             print(f'{path}:{allow.line}: [警告] 使われていない例外です（{allow.rule_id}）。不要なら削除する')
 
     if baseline is not None and not args.paths:

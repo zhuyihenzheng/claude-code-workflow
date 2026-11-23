@@ -6,15 +6,15 @@
 
 ### コーディング規約
 
-- レイヤー間の依存は Controller → Service → Mapper/Repository の一方向とする。Controller から永続化層を直接呼び出したり、永続化層のオブジェクトをそのまま公開したりしない。〔guard: controller-no-persistence〕
-- DI はコンストラクタインジェクションに統一し、フィールドインジェクションは使用しない。永続化層はプロジェクトで採用している方式を踏襲し、テンプレートに合わせるために JPA を導入しない。〔guard: java-no-field-injection〕
+- レイヤー間の依存は Controller → Service → Mapper/Repository の一方向とする。Controller から永続化層を直接呼び出したり、永続化層のオブジェクトをそのまま公開したりしない。〔guard: controller-no-persistence〕〔ArchUnit: controllers_do_not_use_persistence, services_do_not_depend_on_controllers〕
+- DI はコンストラクタインジェクションに統一し、フィールドインジェクションは使用しない。永続化層はプロジェクトで採用している方式を踏襲し、テンプレートに合わせるために JPA を導入しない。〔guard: java-no-field-injection〕〔ArchUnit: no_field_injection〕
 - REST の例外はプロジェクトの規約に従って JSON で返す（例：`@RestControllerAdvice`）。画面の例外はビューで処理し（例：`@ControllerAdvice` + ModelAndView）、画面に JSON のエラーレスポンスを返さない。例外を握りつぶさない。〔guard: java-no-empty-catch, java-no-print-stack-trace〕
 - テストには JUnit 5 + Mockito を使用する。新規コードには必ずテストを追加し、失敗するテストを先に作成してから実装する。結合テストには Testcontainers を使用する。テストを無効化して通さない。待ち合わせに固定時間の sleep を使わない。〔guard: test-no-disabled, java-no-thread-sleep, e2e-no-fixed-wait〕
 - ビルドにはプロジェクトの Maven Wrapper を使用し、システムにインストールされた mvn は使用しない。
 
 ### 画面の実装規約と検証
 
-- JSP は描画のみを担当する。scriptlet の新規追加は禁止する。業務ロジックは Controller/Service に配置し、式には EL + JSTL を使用する。ユーザーが操作できる値の出力は、コンテキストに応じて必ずエスケープする。〔guard: jsp-no-scriptlet〕
+- JSP は描画のみを担当する。scriptlet の新規追加は禁止する。業務ロジックは Controller/Service に配置し、式には EL + JSTL を使用する。ユーザーが操作できる値の出力は、コンテキストに応じて必ずエスケープする。〔guard: jsp-no-scriptlet〕〔PMD: NoUnsanitizedJSPExpression〕
 - HTMX の画面全体と部分テンプレート（フラグメント）は別々のビューとし、既存のルーティング規約を踏襲する。JSP のフラグメントは専用の JSP ビュー名を返し、Thymeleaf の `:: fragment` 構文は使用しない。
 - `hx-target` には画面上に存在する id を指定する。入力チェックエラー時はプロジェクトの仕様に従い、422 を使用する場合は 422 の swap 設定を事前に確認する。リクエストには共通の CSRF ヘッダーを付与する。`HX-Request` を認証・認可の判断根拠にしない。
 - バックエンドの変更：関連テストとコンパイルが成功したことを確認し、実際のコマンド出力を提示する。コミット前に verify を全体実行し、マージ前に CI で再検証する。
@@ -24,7 +24,7 @@
 
 ### 修正指示と決定的チェック
 
-- 規約末尾の〔guard: …〕は、その規約のうち `python scripts/guard.py`（ルールは `config/guard/rules.json`）が検査する部分のルール ID である。タグのない規約と、検査できない部分はレビューで確認する。
+- 規約末尾の〔guard: …〕は、その規約のうち `python scripts/guard.py`（ルールは `config/guard/rules.json`）が検査する部分のルール ID である。〔ArchUnit: …〕（`src/test/java/ArchitectureTest.java`）と〔PMD: …〕（`config/pmd/jsp-ruleset.xml`）は `./mvnw verify` が検査する。タグのない規約と、検査できない部分はレビューで確認する。
 - 変更後とコミット前に `python scripts/guard.py` を実行し、違反は表示された直し方で直す。ルールを弱めない。例外（`guard:allow`）とベースライン（`config/guard/baseline.json`）は人だけが追加・更新する。件数を縮小する `--update-baseline` は実行してよい。
 - 人から修正を指示されたら、直したうえで同じ誤りを繰り返さない仕組みを次の順で検討する：設計（正しい方法を 1 つにし、古い実装を削除する）→ 型・コンパイル → guard のルール → テスト → 文章のルール。文章だけで済ませるのは、判断が必要で機械化できないものに限る。
 - 回避策を正当化するコメントやコメントアウトしたコードを残さない。直せない外部の制約は、テストかルールで表し、課題番号を記載する。〔guard: comment-workaround, java-no-commented-out-code〕

@@ -183,12 +183,38 @@ class TemplateTests(unittest.TestCase):
         self.assertIn('Edit(/config/guard/baseline.json)', perms['ask'])
 
     def test_guard_runs_in_ci_and_the_skills_name_real_files(self):
-        self.assertIn('run: python3 scripts/guard.py\n', (PROJECT / '.github/workflows/ci.yml.example').read_text(encoding='utf-8'))
+        self.assertIn('run: python3 scripts/guard.py --format github\n',
+                      (PROJECT / '.github/workflows/ci.yml.example').read_text(encoding='utf-8'))
         for name in ('correct', 'feature-map', 'spring-endpoint', 'change-flow'):
             text = (PROJECT / '.claude/skills' / name / 'SKILL.md').read_text(encoding='utf-8')
             for path in set(re.findall(r'(?:scripts|config/guard|docs/feature-map)/[\w./-]+\.(?:py|mjs|json|md)', text)):
                 with self.subTest(skill=name, path=path):
                     self.assertTrue((PROJECT / path).is_file(), path)
+
+    def test_archunit_and_pmd_tags_match_the_test_the_ruleset_and_the_sample_pom(self):
+        agents = (PROJECT / 'AGENTS.md').read_text(encoding='utf-8')
+
+        def tagged(tool):
+            names = {p.strip() for t in re.findall('〔' + tool + ':([^〕]*)〕', agents) for p in t.split(',')}
+            return {n for n in names if re.fullmatch(r'\w+', n)}
+
+        test = (PROJECT / 'src/test/java/ArchitectureTest.java').read_text(encoding='utf-8')
+        self.assertEqual(tagged('ArchUnit'), set(re.findall(r'@ArchTest\s+static final ArchRule (\w+)', test)))
+        self.assertNotRegex(test, r'^package ', 'the default package keeps the test independent of project packages')
+        ruleset = (PROJECT / 'config/pmd/jsp-ruleset.xml').read_text(encoding='utf-8')
+        self.assertEqual(tagged('PMD'), set(re.findall(r'ref="category/jsp/\w+\.xml/(\w+)"', ruleset)))
+
+        def blocks(text):
+            text = re.sub(r'<!--.*?-->', '', text, flags=re.S)
+            return [' '.join(b.split()) for b in re.findall(r'<(?:dependency|plugin)>.*?</(?:dependency|plugin)>', text, re.S)
+                    if 'archunit' in b or 'maven-pmd-plugin' in b]
+
+        snippet = blocks((PROJECT / 'config/quality/pom-snippet.xml').read_text(encoding='utf-8'))
+        self.assertEqual(len(snippet), 2)
+        self.assertEqual(blocks((ROOT / 'tests/fixtures/sample-app/pom.xml').read_text(encoding='utf-8')), snippet)
+        # check forks the pmd goal without the execution's configuration, so it must sit on the plugin.
+        plugin = snippet[1]
+        self.assertLess(plugin.index('<configuration>'), plugin.index('<executions>'))
 
     def test_feature_map_files_follow_the_contract(self):
         readme = (PROJECT / 'docs/feature-map/README.md').read_text(encoding='utf-8')

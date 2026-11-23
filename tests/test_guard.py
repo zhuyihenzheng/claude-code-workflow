@@ -255,6 +255,16 @@ class GuardTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn('[java-no-field-injection]', result.stdout)
 
+    def test_github_format_annotates_the_failing_lines(self):
+        self.write(CONTROLLER, FIELD_INJECTION)
+        code, out = self.run_guard('--format', 'github')
+        self.assertEqual(code, 1, out)
+        self.assertIn(f'::error file={CONTROLLER},line=6,title=guard java-no-field-injection::フィールドインジェクション', out)
+        self.assertIn(f'{CONTROLLER}:6: [java-no-field-injection]', out, 'the readable line stays in the log')
+        self.write('src/main/java/a,b%c.java', 'class A {\n    // 暫定\n}\n')
+        code, out = self.run_guard('--format', 'github')
+        self.assertIn('::error file=src/main/java/a%2Cb%25c.java,line=2,title=guard comment-workaround::', out)
+
     def test_list_shows_fix_and_origin(self):
         code, out = self.run_guard('--list')
         self.assertEqual(code, 0)

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ruleset name="jsp"
+         xmlns="http://pmd.sourceforge.net/ruleset/2.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://pmd.sourceforge.net/ruleset/2.0.0 https://pmd.sourceforge.io/ruleset_2_0_0.xsd">
+  <description>JSP の出力エスケープ漏れを PMD で検査する（AGENTS.md「画面の実装規約と検証」）。./mvnw verify で実行される。</description>
+  <rule ref="category/jsp/security.xml/NoUnsanitizedJSPExpression"
+        message="EL 式をそのまま出力しない。本文は &lt;c:out value=&quot;${...}&quot;/&gt;、HTML の属性値は ${fn:escapeXml(...)} で出力する（属性の中の &lt;c:out&gt; は PMD が判定できない）"/>
+</ruleset>

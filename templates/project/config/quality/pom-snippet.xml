@@ -1,0 +1,49 @@
+<!--
+  pom.xml に追加する設定（ArchUnit と PMD の JSP 検査）。どちらも ./mvnw verify で実行される。
+  インストーラーは pom.xml を変更しない。人が内容を確認して、該当する場所に追加する。
+  - <dependency> は <dependencies> に、<plugin> は <build><plugins> に追加する。
+  - ArchUnit のテストは、install.py に with-archunit オプションを付けると src/test/java/ArchitectureTest.java に入る。
+  - maven-pmd-plugin を Java の検査に既に使っている場合は、この <configuration> を既存の設定と統合せず、
+    プロファイルに分けるなどして、JSP の検査を別に実行する。check ゴールが内部で実行する pmd ゴールには、
+    <execution> の中の設定が渡らないため、設定は <plugin> 直下に置く。
+  - 既存の JSP に違反が多い場合は、導入時に人が maxAllowedViolations を現在の件数に設定し、直すたびに減らす。
+-->
+<snippet>
+  <dependency>
+    <groupId>com.tngtech.archunit</groupId>
+    <artifactId>archunit-junit5</artifactId>
+    <version>1.5.1</version>
+    <scope>test</scope>
+  </dependency>
+
+  <plugin>
+    <groupId>org.apache.maven.plugins</groupId>
+    <artifactId>maven-pmd-plugin</artifactId>
+    <version>3.28.0</version>
+    <configuration>
+      <language>jsp</language>
+      <rulesets>
+        <ruleset>config/pmd/jsp-ruleset.xml</ruleset>
+      </rulesets>
+      <compileSourceRoots>
+        <compileSourceRoot>${project.basedir}/src/main/webapp</compileSourceRoot>
+      </compileSourceRoots>
+      <includes>
+        <include>**/*.jsp</include>
+        <include>**/*.jspf</include>
+        <include>**/*.tag</include>
+      </includes>
+      <printFailingErrors>true</printFailingErrors>
+      <maxAllowedViolations>0</maxAllowedViolations>
+    </configuration>
+    <executions>
+      <execution>
+        <id>jsp-xss</id>
+        <phase>verify</phase>
+        <goals>
+          <goal>check</goal>
+        </goals>
+      </execution>
+    </executions>
+  </plugin>
+</snippet>
