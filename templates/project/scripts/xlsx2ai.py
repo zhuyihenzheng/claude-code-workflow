@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Excel 設計書を AI が少ないトークンで読める形式に変換する（増分変換）。
+"""Excel 設計書を AI と人が少ないトークンで読める形式に変換する（増分変換）。
 
     python scripts/xlsx2ai.py [SRC_DIR] [OUT_DIR] [--check] [--extract-media]
 
@@ -7,7 +7,8 @@
 
     OUT_DIR/index.md                 全ブックの目次（AI はここから読む）
     OUT_DIR/<book>/index.md          シート一覧（文字数・図形フロー・画像の有無）
-    OUT_DIR/<book>/sheets/<sheet>.json   ExStruct light：空セルを除いた値と行列番号
+    OUT_DIR/<book>/sheets/<sheet>.md     表は Markdown の表、地の文は字下げどおりの箇条書き（まずこれを読む）
+    OUT_DIR/<book>/sheets/<sheet>.json   ExStruct light：空セルを除いた値と行列番号（セル位置が必要なとき）
     OUT_DIR/<book>/flows/<sheet>.mmd     図形＋コネクタで描かれたフロー図（excel2md）
     OUT_DIR/<book>/media/*           --extract-media 指定時のみ：貼り付け画像（フロー図の画像など）
 
@@ -18,7 +19,7 @@
 再変換し、削除されたブックの出力も削除する。--check は書き込まずに古い出力を報告し、
 古いものがあれば終了コード 1 を返す（CI 用）。
 
-依存：pip install "exstruct==0.9.0" "excel2md==2.3.0"
+依存：pip install "exstruct==0.9.1" "excel2md==2.3.0"
 """
 import argparse
 import hashlib
@@ -42,7 +43,7 @@ TOOL_CODE = {
     'excel2md': 'import sys; from excel2md.cli import main; sys.exit(main())',
 }
 # Bump when the output layout changes so every book is regenerated.
-FORMAT_VERSION = 1
+FORMAT_VERSION = 2
 
 
 class ConversionError(RuntimeError):
@@ -61,7 +62,7 @@ def tool(name, *args):
     if result.returncode != 0:
         detail = (result.stderr or result.stdout).strip().splitlines()[-1:] or ['']
         if 'No module named' in detail[0]:
-            detail = [f'{name} が未インストールです（pip install "exstruct==0.9.0" "excel2md==2.3.0"）']
+            detail = [f'{name} が未インストールです（pip install "exstruct==0.9.1" "excel2md==2.3.0"）']
         raise ConversionError(f'{name} が失敗しました：{detail[0]}')
     return result
 
@@ -166,6 +167,119 @@ def extract_flows(path, sheets):
     return flows
 
 
+# シートの Markdown：ExStruct の行（空セルを除いた値と列番号）から、表と地の文を復元する。
+# 表：見出し行と、同じ左端の列から始まり見出し行の列に収まる行の並び（2 段の見出し、結合で生じた 2 行までの空行を許す）。
+#     値が 1 つだけの行（番号・記号を除く）は表の終わりとみなす。
+# 地の文：字下げ（左端の列）の深さに応じた箇条書き。番号や記号で始まる 1 セルの行は見出しにする。
+HEADING = re.compile(r'^(?:\d+(?:\.\d+)*[.．]?\s|[■□◆◇●【≪＜〈《\[])')
+BULLETS = {'・', '-', '－', '*', '＊', '●', '○'}
+MARKER = re.compile(r'^(?:[・※\-－*＊●○]|[①-⑳]|\(?\d+\)|[0-9]+[.．、]?)$')
+MAX_GAP = 2
+HTML_TAG = re.compile(r'<(?=[A-Za-z/!])')
+
+
+def cell_text(value):
+    if isinstance(value, float) and value.is_integer():
+        value = int(value)
+    text = str(value).strip()
+    return text[:-9] if re.fullmatch(r'\d{4}-\d{2}-\d{2} 00:00:00', text) else text
+
+
+def row_cells(row):
+    items = sorted((int(col), cell_text(value)) for col, value in row.get('c', {}).items())
+    return [(col, value) for col, value in items if value]
+
+
+def table_header(rows):
+    """(列ごとの見出し, 見出しの行数)。rows が表でなければ None。"""
+    first = rows[0][1]
+    if len(first) < 2 or MARKER.match(first[0][1]):
+        return None
+    start = first[0][0]
+    labels, body, count = dict(first), rows[1:], 1
+    if body and body[0][1][0][0] > start and len(body[0][1]) >= 2:
+        sub, parent, merged = dict(body[0][1]), '', {}
+        for col in sorted(set(labels) | set(sub)):
+            parent = labels.get(col, parent)
+            merged[col] = f'{parent}/{sub[col]}' if col in sub and parent else sub.get(col) or labels[col]
+        labels, body, count = merged, body[1:], 2
+    if not body:
+        return None
+    for _, cells in body:
+        if cells[0][0] != start or not {col for col, _ in cells} <= set(labels):
+            return None
+        if len(cells) == 1 and not MARKER.match(cells[0][1]):
+            return None
+    return labels, count
+
+
+def is_title(text, marked=False):
+    """見出しになる 1 セルの行。文（。で終わる）は見出しにしない。"""
+    return not text.endswith('。') and (not marked or bool(HEADING.match(text)))
+
+
+def md_text(text):
+    return HTML_TAG.sub(r'\\<', text)
+
+
+def table_lines(rows, labels, count):
+    cols = sorted(labels)
+
+    def line(values):
+        return '| ' + ' | '.join(md_text(values.get(col, '')).replace('|', '\\|').replace('\n', '<br>') for col in cols) + ' |'
+
+    return [line(labels), '|' + '---|' * len(cols)] + [line(dict(cells)) for _, cells in rows[count:]]
+
+
+def run_end(rows, i):
+    j = i + 1
+    while j < len(rows) and rows[j][0] - rows[j - 1][0] <= MAX_GAP + 1:
+        j += 1
+    return j
+
+
+def table_at(rows, i):
+    for k in range(run_end(rows, i), i + 1, -1):
+        if (header := table_header(rows[i:k])):
+            return k, header
+    return None
+
+
+def sheet_markdown(name, sheet_rows, flows=''):
+    """ExStruct light のシート 1 枚を Markdown にする。"""
+    rows = [(row['r'], cells) for row in sorted(sheet_rows, key=lambda row: row['r']) if (cells := row_cells(row))]
+    heading_cols = sorted({cells[0][0] for _, cells in rows if len(cells) == 1 and is_title(cells[0][1], True)})
+    out, stack, i = [f'# {md_text(name)}', ''], [], 0
+    while i < len(rows):
+        if (found := table_at(rows, i)):
+            k, (labels, count) = found
+            out += ([''] if out[-1] else []) + table_lines(rows[i:k], labels, count) + ['']
+            stack, i = [], k
+            continue
+        cells = rows[i][1]
+        if len(cells) > 1 and cells[0][1] in BULLETS:
+            cells = cells[1:]
+        joined = md_text(' '.join(value.replace('\n', ' ') for _, value in cells))
+        if len(rows[i][1]) == 1 and is_title(joined, True):
+            level = min(2 + heading_cols.index(cells[0][0]), 6)
+            out += ([''] if out[-1] else []) + ['#' * level + ' ' + joined, '']
+            stack = []
+        elif len(rows[i][1]) == 1 and is_title(joined) and table_at(rows, i + 1):
+            out += ([''] if out[-1] else []) + [f'**{joined}**']
+            stack = []
+        else:
+            col = rows[i][1][0][0]
+            while stack and stack[-1] > col:
+                stack.pop()
+            if not stack or stack[-1] < col:
+                stack.append(col)
+            out.append('  ' * (len(stack) - 1) + '- ' + joined)
+        i += 1
+    if flows:
+        out += ['', '```mermaid', flows.strip(), '```']
+    return '\n'.join(out).strip() + '\n'
+
+
 def convert(path, dest, extract_media):
     """Convert one workbook into dest (a fresh directory). Returns the per-book summary."""
     sheets_dir = dest / 'sheets'
@@ -189,8 +303,14 @@ def convert(path, dest, extract_media):
                 (dest / 'media' / PurePosixPath(name).name).write_bytes(zf.read(name))
     rows = []
     for json_file in sorted(sheets_dir.glob('*.json')):
-        rows.append({'sheet': json_file.stem, 'file': f'sheets/{json_file.name}',
-                     'chars': len(json_file.read_text(encoding='utf-8'))})
+        raw = json_file.read_text(encoding='utf-8')
+        data = json.loads(raw)
+        name = data.get('sheet_name') or json_file.stem
+        markdown = sheet_markdown(name, (data.get('sheet') or {}).get('rows') or [], flows.get(name, ''))
+        md_file = json_file.with_suffix('.md')
+        md_file.write_text(markdown, encoding='utf-8', newline='\n')
+        rows.append({'sheet': name, 'file': f'sheets/{json_file.name}', 'md': f'sheets/{md_file.name}',
+                     'chars': len(raw), 'md_chars': len(markdown)})
     return {'sheets': rows, 'drawings': drawings, 'flows': sorted(flows), 'media': len(media)}
 
 
@@ -202,14 +322,17 @@ def md_link(text, target):
 def write_book_index(dest, source_rel, summary):
     lines = [f'# {source_rel}', '',
              '生成物：`scripts/xlsx2ai.py`。手で編集しない。原本の Excel を直接読まず、必要なシートだけを開く。', '',
-             '| シート | ファイル | 文字数 | 図形フロー | 画像 |', '|---|---|---:|---|---:|']
+             '| シート | Markdown | JSON | 文字数 | 図形フロー | 画像 |', '|---|---|---|---:|---|---:|']
     for row in summary['sheets']:
         d = summary['drawings'].get(row['sheet'], {})
         mmd = f"flows/{safe_name(row['sheet'])}.mmd"
         flow = md_link(mmd, mmd) if row['sheet'] in summary['flows'] else ''
         sheet = row['sheet'].replace('|', '\\|')
-        lines.append(f"| {sheet} | {md_link(row['file'], row['file'])} | {row['chars']:,} | {flow} | {d.get('pictures', 0)} |")
-    lines += ['', 'シート JSON は空セルを除いた `{"r": 行, "c": {列: 値}}`（0 始まりの列番号）。結合セルの範囲は含まない。']
+        lines.append(f"| {sheet} | {md_link(row['md'], row['md'])} | {md_link(row['file'], row['file'])} | "
+                     f"{row['md_chars']:,} | {flow} | {d.get('pictures', 0)} |")
+    lines += ['', 'まず Markdown を読む。表は Markdown の表、地の文は字下げどおりの箇条書き、図形フローは Mermaid で入っている。',
+              'セルの位置が必要なとき（`xlsx_patch.py` の変更指示を書くときなど）だけ JSON を読む。'
+              'JSON は空セルを除いた `{"r": 行, "c": {列: 値}}`（0 始まりの列番号）で、結合セルの範囲は含まない。']
     if summary['flows']:
         lines.append('図形フローの分岐ラベル（はい／いいえ等）は独立ノードとして出ることがある。原本と照合して辺に付け直す。')
     if summary['media']:
@@ -272,7 +395,7 @@ def run(src, out, check=False, extract_media=False, log=print):
         tmp.rename(dest)
         manifest['books'][key] = {
             'source': path.relative_to(src).as_posix(), 'sha256': digest,
-            'sheet_count': len(summary['sheets']), 'chars': sum(r['chars'] for r in summary['sheets']),
+            'sheet_count': len(summary['sheets']), 'chars': sum(r['md_chars'] for r in summary['sheets']),
             'flows': summary['flows'], 'media': summary['media'], 'media_extracted': extract_media,
         }
         log(f"変換：{path} → {dest}（{len(summary['sheets'])} シート、フロー {len(summary['flows'])}）")

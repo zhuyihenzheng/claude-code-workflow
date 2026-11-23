@@ -122,6 +122,35 @@ class Xlsx2AiTests(unittest.TestCase):
         self.assertFalse((book / 'flows').exists())
         self.assertFalse((book / 'media').exists())
 
+
+    def test_each_sheet_also_gets_markdown_linked_from_the_index(self):
+        make_book(self.src / 'flow.xlsx', flow_on_sheet='テーブル一覧')
+        code, log = run(self.src, self.out)
+        self.assertEqual(code, 0, log)
+        book = self.out / 'flow'
+        table = (book / 'sheets' / 'テーブル一覧.md').read_text(encoding='utf-8')
+        self.assertTrue(table.startswith('# テーブル一覧\n'))
+        self.assertIn('| No | テーブル名 | 論理名 |\n|---|---|---|\n| 1 | book | 蔵書 |\n| 2 | loan | 貸出 |', table)
+        self.assertIn('```mermaid\nflowchart', table, 'the shape flowchart is embedded in its sheet')
+        self.assertIn('- テーブル定義書', (book / 'sheets' / '表紙.md').read_text(encoding='utf-8'))
+        index = (book / 'index.md').read_text(encoding='utf-8')
+        self.assertIn('| テーブル一覧 | [sheets/テーブル一覧.md](<sheets/テーブル一覧.md>) | [sheets/テーブル一覧.json](<sheets/テーブル一覧.json>) |', index)
+        self.assertIn('まず Markdown を読む', index)
+        chars = sum(len(p.read_text(encoding='utf-8')) for p in (book / 'sheets').glob('*.md'))
+        self.assertEqual(json.loads((self.out / xlsx2ai.MANIFEST).read_text(encoding='utf-8'))['books']['flow']['chars'], chars)
+
+    def test_output_from_an_older_format_is_regenerated(self):
+        make_book(self.src / 'a.xlsx')
+        self.assertEqual(run(self.src, self.out)[0], 0)
+        manifest = self.out / xlsx2ai.MANIFEST
+        data = json.loads(manifest.read_text(encoding='utf-8'))
+        data['format'] = xlsx2ai.FORMAT_VERSION - 1
+        manifest.write_text(json.dumps(data), encoding='utf-8')
+        (self.out / 'a' / 'sheets' / '表紙.md').unlink()
+        self.assertEqual(run(self.src, self.out, '--check')[0], 1)
+        self.assertEqual(run(self.src, self.out)[0], 0)
+        self.assertTrue((self.out / 'a' / 'sheets' / '表紙.md').is_file())
+
     def test_books_sharing_a_name_are_all_converted(self):
         # a.xlsx and a.xlsm used to map to the same output directory; one was dropped silently.
         make_book(self.src / '設計書.xlsx')
@@ -233,6 +262,102 @@ class Xlsx2AiTests(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn('失敗：', log)
         self.assertNotIn('Traceback', log)
+
+
+def grid(*rows):
+    """ExStruct light rows from (row number, {column: value}) pairs."""
+    return [{'r': r, 'c': {str(c): v for c, v in cells.items()}} for r, cells in rows]
+
+
+class SheetMarkdownTests(unittest.TestCase):
+    def test_design_document_grid_becomes_headings_tables_and_outline(self):
+        md = xlsx2ai.sheet_markdown('S01 注文登録', grid(
+            (1, {0: 'システム名', 7: '受注', 40: '作成者', 44: '山田'}),
+            (3, {1: '■ 画面一覧'}),
+            (4, {1: '画面ID', 5: '画面名', 12: 'URL'}),
+            (5, {1: 'S01', 5: '注文登録', 12: '/orders/new'}),
+            (6, {1: 'S02', 5: '注文照会', 12: '/orders'}),
+            (8, {1: '5.2 相関チェック'}),
+            (9, {1: '項番', 3: 'チェック内容', 20: 'メッセージ'}),
+            (10, {1: 1, 3: '名前が未入力', 20: '名前を入力してください'}),
+            (11, {1: 2, 3: '数量が 0 以下', 20: '数量は 1 以上を入力してください'}),
+            (13, {1: '≪処理概要≫'}),
+            (14, {2: '①', 3: '入力内容を検証する'}),
+            (15, {3: '・', 4: 'エラーがあればフォームを再表示する'}),
+            (16, {4: '入力値は保持する'}),
+            (17, {2: '②', 3: '注文を登録する'}),
+        ))
+        self.assertTrue(md.startswith('# S01 注文登録\n\n- システム名 受注 作成者 山田\n'))
+        self.assertIn('## ■ 画面一覧\n\n| 画面ID | 画面名 | URL |\n|---|---|---|\n| S01 | 注文登録 | /orders/new |', md)
+        self.assertIn('## 5.2 相関チェック\n\n| 項番 | チェック内容 | メッセージ |\n|---|---|---|\n'
+                      '| 1 | 名前が未入力 | 名前を入力してください |', md)
+        self.assertIn('## ≪処理概要≫\n\n- ① 入力内容を検証する\n  - エラーがあればフォームを再表示する\n'
+                      '    - 入力値は保持する\n- ② 注文を登録する\n', md)
+
+    def test_two_column_table_two_row_header_and_merged_gaps(self):
+        md = xlsx2ai.sheet_markdown('s', grid(
+            (1, {1: '条件', 6: 'メッセージ'}),
+            (2, {1: '名前が未入力', 6: '名前を入力してください'}),
+            (3, {1: '登録成功', 6: '登録しました：{名前}'}),
+            (6, {1: 'No.', 3: '項目', 8: 'イベント'}),
+            (7, {8: '初期表示', 10: '操作時'}),
+            (8, {1: 1, 3: '検索入力', 8: '表示', 10: '表示（活性）'}),
+            (11, {1: 2, 3: '検索ボタン', 8: '非表示', 10: '表示'}),
+        ))
+        self.assertIn('| 条件 | メッセージ |\n|---|---|\n| 名前が未入力 | 名前を入力してください |\n| 登録成功 | 登録しました：{名前} |', md)
+        self.assertIn('| No. | 項目 | イベント/初期表示 | イベント/操作時 |', md)
+        self.assertIn('| 2 | 検索ボタン | 非表示 | 表示 |', md, 'two empty rows left by a merged cell do not end the table')
+
+    def test_title_rows_split_tables_and_prose_is_not_mistaken_for_a_table(self):
+        md = xlsx2ai.sheet_markdown('books', grid(
+            (1, {1: 'カラム情報'}),
+            (2, {1: 'No.', 3: '論理名', 8: '物理名'}),
+            (3, {1: 1, 3: '書籍ID', 8: 'id'}),
+            (4, {1: 'インデックス情報'}),
+            (5, {1: 'No.', 3: 'インデックス名', 8: 'カラム'}),
+            (6, {1: 1, 3: 'books_pkey', 8: 'id'}),
+            (8, {3: '・', 4: '一行目'}),
+            (9, {3: '・', 4: '二行目'}),
+            (10, {3: '・', 4: '三行目'}),
+        ))
+        self.assertIn('**カラム情報**\n\n| No. | 論理名 | 物理名 |\n|---|---|---|\n| 1 | 書籍ID | id |\n\n**インデックス情報**', md)
+        self.assertIn('- 一行目\n- 二行目\n- 三行目\n', md)
+
+    def test_lists_never_jump_more_than_one_level_or_turn_into_code_blocks(self):
+        md = xlsx2ai.sheet_markdown('s', grid((1, {1: '■ 概要'}), (2, {9: '深い字下げの段落'}), (3, {20: 'さらに深い'}),
+                                             (4, {2: '浅く戻る'})))
+        self.assertIn('## ■ 概要\n\n- 深い字下げの段落\n  - さらに深い\n- 浅く戻る\n', md)
+        for line in md.splitlines():
+            self.assertFalse(line.startswith('    ') and not line.lstrip().startswith('- '), line)
+
+    def test_escaping_line_breaks_and_dates(self):
+        md = xlsx2ai.sheet_markdown('<sheet>', grid(
+            (1, {1: '項目', 3: '値', 5: '備考'}),
+            (2, {1: 'a|b', 3: '1行目\n2行目', 5: '<input type="text">'}),
+            (3, {1: '日付', 3: '2026-11-23 00:00:00', 5: 'x < y'}),
+            (4, {1: '数量', 3: 3.0, 5: 2.5}),
+        ))
+        self.assertTrue(md.startswith('# \\<sheet>\n'))
+        self.assertIn('| a\\|b | 1行目<br>2行目 | \\<input type="text"> |', md)
+        self.assertIn('| 日付 | 2026-11-23 | x < y |', md)
+        self.assertIn('| 数量 | 3 | 2.5 |', md)
+
+    def test_sentences_are_never_titles_and_prose_ends_a_table(self):
+        md = xlsx2ai.sheet_markdown('s', grid(
+            (1, {2: '項目', 7: '規則'}),
+            (2, {2: '名前', 7: '必須'}),
+            (4, {2: '〈登録〉を押すと、フォームの領域だけを置き換える。'}),
+            (6, {2: '条件', 8: 'メッセージ'}),
+            (7, {2: '名前が未入力', 8: '名前を入力してください'}),
+            (8, {2: '入力値は保持する。'}),
+        ))
+        self.assertIn('| 項目 | 規則 |\n|---|---|\n| 名前 | 必須 |\n\n- 〈登録〉を押すと、フォームの領域だけを置き換える。\n', md)
+        self.assertIn('| 名前が未入力 | 名前を入力してください |\n\n- 入力値は保持する。\n', md)
+
+    def test_empty_sheet_and_shape_flow(self):
+        self.assertEqual(xlsx2ai.sheet_markdown('空', []), '# 空\n')
+        md = xlsx2ai.sheet_markdown('フロー', grid((1, {1: '処理フロー'})), 'flowchart TD\n  A --> B\n')
+        self.assertTrue(md.endswith('```mermaid\nflowchart TD\n  A --> B\n```\n'))
 
 
 class InspectDrawingsTests(unittest.TestCase):

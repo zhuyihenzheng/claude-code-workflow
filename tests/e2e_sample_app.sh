@@ -4,6 +4,7 @@
 # Steps: install templates -> guard (pass + real past mistakes) -> ./mvnw verify (JUnit, ArchUnit, PMD on JSP)
 #        -> what guard cannot see: ArchUnit and PMD catch it -> Stop hook (pass + real compile failure)
 #        -> start the app -> htmx-check.mjs (success, 422 re-render, escaping) -> feature map recipes
+#        -> screen tests, also against an Excel design document converted to Markdown by xlsx2ai.py
 #        -> screen tests (framework installed from GitHub at the pinned commit) -> xlsx_patch on the generated results.
 set -euo pipefail
 # Rule messages are Japanese; Maven and the forked test JVM print them in the locale's encoding.
@@ -173,6 +174,18 @@ node scaffold-probe/run.mjs --engine playwright --build-only > /dev/null
 step "screen tests: case definitions and design-document coverage (no browser)"
 node run.mjs --engine playwright --build-only | tee "$OUT/screen-tests-build.txt"
 grep -q '設計書の 3 項目中 3 項目にケースあり' "$OUT/screen-tests-build.txt"
+
+step "screen tests: an Excel design document converted by xlsx2ai gives the same coverage"
+(cd "$WORK" && python "$REPO/tests/make_sample_design_xlsx.py" specs/設計書.xlsx && python scripts/xlsx2ai.py)
+EXCEL_MD="$WORK/specs-ai/設計書/sheets/注文登録.md"
+cp "$EXCEL_MD" "$OUT/excel-design.md"
+grep -q '^| 条件 | メッセージ |$' "$EXCEL_MD"
+cp site.mjs "$OUT/site.mjs.orig"
+sed -i "s#design: DIR + '../docs/設計書.md'#design: DIR + '../specs-ai/設計書/sheets/注文登録.md'#" site.mjs
+grep -q "specs-ai/設計書/sheets/注文登録.md" site.mjs
+node run.mjs --engine playwright --build-only | tee "$OUT/screen-tests-build-excel.txt"
+grep -q '設計書の 3 項目中 3 項目にケースあり' "$OUT/screen-tests-build-excel.txt"
+cp "$OUT/site.mjs.orig" site.mjs
 
 step "screen tests: run against the app"
 node run.mjs --engine playwright | tee "$OUT/screen-tests-run.txt"

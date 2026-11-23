@@ -72,7 +72,7 @@ node scripts/htmx-check.mjs --storage-state target/htmx-check/state.json --clear
 
 ## Excel 设计书转换脚本
 
-[`project/scripts/xlsx2ai.py`](project/scripts/xlsx2ai.py) 把 `specs/` 下的 .xlsx/.xlsm 转成 `specs-ai/`：按 sheet 拆分的 ExStruct light JSON、图形流程图的 Mermaid（excel2md）以及目次。只重转 SHA-256 变化的文件，删除原本已不存在的输出；`--check` 供 CI 检查过期。需 Python 3.11+ 与 `pip install "exstruct==0.9.0" "excel2md==2.3.0"`。模板 settings 同时 deny `Read(/**/*.xlsx)` / `Read(/**/*.xlsm)`，避免 AI 直接读原本。实测数据、人工处理项与 MCP 定位见 [11 · Excel 设计书](../docs/11-Excel设计书.md)。
+[`project/scripts/xlsx2ai.py`](project/scripts/xlsx2ai.py) 把 `specs/` 下的 .xlsx/.xlsm 转成 `specs-ai/`：按 sheet 拆分的 Markdown（表还原成 Markdown 表、地の文按缩进成为列表、图形流程图以 Mermaid 嵌入）、同名的 ExStruct light JSON（需要单元格位置时用）以及目次。只重转 SHA-256 变化的文件，删除原本已不存在的输出；`--check` 供 CI 检查过期。需 Python 3.11+ 与 `pip install "exstruct==0.9.1" "excel2md==2.3.0"`。模板 settings 同时 deny `Read(/**/*.xlsx)` / `Read(/**/*.xlsm)`，避免 AI 直接读原本。实测数据、人工处理项与 MCP 定位见 [11 · Excel 设计书](../docs/11-Excel设计书.md)。
 
 ## 确定性检查（guard）与纠正流程
 

@@ -68,7 +68,7 @@ docs/feature-map/README.md        機能マップの書式（1 機能 1 ファ�
 scripts/sync_rules.py             rules から Copilot の指示を生成し、--check で差分を検出する
 scripts/guard.py                  決定的チェック：新しい違反、期限切れの例外、壊れたルールで失敗する。既存の違反は縮小だけができる
 scripts/htmx-check.mjs            実ブラウザーで HTMX のフラグメント置換を検証する（ログイン状態、セッション失効に対応）
-scripts/xlsx2ai.py                Excel 設計書をシート単位の JSON／Mermaid に変換する
+scripts/xlsx2ai.py                Excel 設計書をシート単位の Markdown（表・見出し・字下げの箇条書き・Mermaid）と JSON に変換する
 scripts/xlsx_patch.py             変更指示どおりに Excel を書き換える（指示したセル以外は変更しない）
 screen-tests/                     （任意）画面試験。バージョンを固定した midscene-poc を使用する
 src/test/java/ArchitectureTest.java （任意、--with-archunit）コンパイル済みの依存関係でレイヤーとフィールドインジェクションを検査する
@@ -84,6 +84,7 @@ src/test/java/ArchitectureTest.java （任意、--with-archunit）コンパイ�
 | バージョンを固定した Playwright MCP／DBHub の起動とツール一覧の取得、workflow の actionlint | Copilot の各機能が AGENTS.md とパス別指示を読み込むかどうか |
 | `guard.py` の単体テスト（3 OS）、サンプルアプリでの合格・実際の誤りの検出、機能マップのコマンドの実行（Ubuntu） | 初期ルールの業務コードでの誤検知率、`correct` の実際の修正指示での動き |
 | ArchUnit と PMD：サンプルアプリの `./mvnw verify`、guard では見えない同一パッケージの参照と、エスケープしていない EL の検出（Ubuntu） | マルチモジュールや既存の違反が多いプロジェクトへの導入 |
+| Excel 設計書 → Markdown：合成ブックの単体テスト（3 OS）、サンプルアプリの Excel 版設計書から変換した Markdown で画面試験の観点カバレッジが Markdown 版と一致（Ubuntu） | 公開サンプルと書式が異なる実際の設計書での復元品質 |
 
 ```bash
 python3 -m pip install -r requirements-dev.txt     # Python 3.11+

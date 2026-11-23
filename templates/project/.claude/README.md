@@ -55,4 +55,4 @@
 
 ## Excel 設計書
 
-`settings.json` は `.xlsx` / `.xlsm` の Read を deny している。`python scripts/xlsx2ai.py` が `specs/` を `specs-ai/` に変換し、AI は `specs-ai/index.md` から必要なシートだけを読む。CI では `python scripts/xlsx2ai.py --check` で変換漏れを検出できる。Excel 設計書を使用しないプロジェクトでは、スクリプトと deny ルールを削除してよい。
+`settings.json` は `.xlsx` / `.xlsm` の Read を deny している。`python scripts/xlsx2ai.py` が `specs/` を `specs-ai/` に変換し、AI は `specs-ai/index.md` から必要なシートの Markdown（`sheets/<シート>.md`：表は Markdown の表、地の文は箇条書き、図形フローは Mermaid）だけを読み、セル番地が必要なときだけ同名の JSON を読む。Markdown は人のレビューや PR の差分確認、画面試験の観点カバレッジ（`site.mjs` の `design`）にも使える。CI では `python scripts/xlsx2ai.py --check` で変換漏れを検出できる。Excel 設計書を使用しないプロジェクトでは、スクリプトと deny ルールを削除してよい。
