@@ -1,6 +1,7 @@
 name: Copilot Setup Steps
 
-# 任意で有効化する。GitHub Copilot のクラウドエージェントとコードレビューが作業を始める前に、依存関係を用意する。
+# 任意。GitHub Copilot のクラウドエージェントを使う場合だけ導入する（install.py の --with-copilot-cloud-agent）。
+# クラウドエージェントとコードレビューが作業を始める前に、依存関係を用意する。
 # 使用する場合は copilot-setup-steps.yml に名前を変え、デフォルトブランチにマージする（マージ前は使われない）。
 # ジョブ名は copilot-setup-steps 固定。変更できるのは steps / permissions / runs-on / services / snapshot / timeout-minutes だけ。
 # ここで実行する処理には Copilot のファイアウォールが適用されないため、ダウンロードはここで済ませる。

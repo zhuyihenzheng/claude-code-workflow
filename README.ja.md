@@ -29,6 +29,7 @@ python3 scripts/install.py project /path/to/your-project --diff   # 予行：既
 python3 scripts/install.py project /path/to/your-project --apply  # 書き込む
 python3 scripts/install.py project /path/to/your-project --apply --with-screen-tests   # 画面試験（midscene-poc）も導入する
 python3 scripts/install.py project /path/to/your-project --apply --with-archunit        # ArchUnit のレイヤー検査も導入する（pom.xml への追加が必要）
+python3 scripts/install.py project /path/to/your-project --apply --with-copilot-cloud-agent   # Copilot のクラウドエージェントを使う場合だけ：環境準備の workflow
 python3 scripts/install.py doctor /path/to/your-project           # 導入後の確認：TODO の残り、ルールの同期、guard の結果、設定上のリスク
 ```
 

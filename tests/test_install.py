@@ -43,7 +43,8 @@ class InstallTests(unittest.TestCase):
         self.assertFalse((self.target / '.claude').exists())
 
     def test_apply_into_empty_project_copies_every_template_byte_for_byte(self):
-        run('project', self.target, '--apply', '--with-workflows', '--with-screen-tests', '--with-archunit')
+        run('project', self.target, '--apply', '--with-workflows', '--with-screen-tests', '--with-archunit',
+            '--with-copilot-cloud-agent')
         for rel, source in install.template_files(PROJECT):
             with self.subTest(rel=rel):
                 self.assertEqual((self.target / rel).read_bytes(), source.read_bytes())
@@ -56,7 +57,7 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertFalse(workflows.exists())
         self.assertRegex(out, r'optional\s+\.github/workflows/claude\.yml\s+\(.*--with-workflows')
-        self.assertEqual(len([line for line in out.splitlines() if line.startswith('optional') and '--with-workflows' in line]), 4)
+        self.assertEqual(len([line for line in out.splitlines() if line.startswith('optional') and '--with-workflows' in line]), 3)
         self.assertEqual({k for rel, k in self.kinds().items() if rel.startswith('.github/workflows/')}, {'optional'})
         self.assertEqual(set(self.kinds().values()), {'skip', 'optional'})
         run('project', self.target, '--apply', '--with-workflows')
@@ -77,6 +78,17 @@ class InstallTests(unittest.TestCase):
         code, out, _ = run('project', self.target, '--with-archunit', '--apply')
         self.assertRegex(out, r'create\s+src/test/java/ArchitectureTest\.java\n')
         self.assertTrue((self.target / 'src/test/java/ArchitectureTest.java').is_file())
+
+    def test_copilot_cloud_agent_setup_is_a_separate_opt_in(self):
+        setup = self.target / '.github/workflows/copilot-setup-steps.yml.example'
+        code, out, _ = run('project', self.target, '--apply', '--with-workflows')
+        self.assertEqual(code, 0)
+        self.assertFalse(setup.exists(), '--with-workflows alone does not set up the Copilot cloud agent')
+        self.assertRegex(out, r'optional\s+\.github/workflows/copilot-setup-steps\.yml\.example\s+\(.*--with-copilot-cloud-agent')
+        self.assertTrue((self.target / '.github/workflows/ci.yml.example').is_file())
+        run('project', self.target, '--apply', '--with-copilot-cloud-agent')
+        self.assertTrue(setup.is_file())
+        self.assertEqual(self.kinds()['.github/workflows/copilot-setup-steps.yml.example'], 'skip')
 
     def test_installed_sync_rules_reports_target_in_sync(self):
         run('project', self.target, '--apply')

@@ -16,7 +16,7 @@
 ## 人が設定するもの
 
 1. **コンテンツ除外**（Copilot Business / Enterprise）：`config/copilot/content-exclusion.yml` の内容を、リポジトリの Settings → Copilot → Content exclusion に貼る。`.env`、認証情報、Excel 原本を Copilot の文脈から外す。反映まで最大 30 分かかる。ファイルシステムの安全境界ではないため、機密情報をリポジトリに置かないことが前提である。
-2. **クラウドエージェントの環境**：`.github/workflows/copilot-setup-steps.yml.example` を `copilot-setup-steps.yml` に名前を変えてデフォルトブランチにマージする。Python（`xlsx2ai.py` の依存）、Playwright と Chromium、Maven の依存関係が、エージェントの作業開始前に用意される。インストーラーは `--with-workflows` を付けた場合だけ workflow をコピーする。
+2. **クラウドエージェントの環境（任意。クラウドエージェントを使う場合だけ）**：既定では導入しない。使う場合は、インストーラーに `--with-copilot-cloud-agent` を付けて `.github/workflows/copilot-setup-steps.yml.example` を入れ、`copilot-setup-steps.yml` に名前を変えてデフォルトブランチにマージする。Python（`xlsx2ai.py` の依存）、Playwright と Chromium、Maven の依存関係が、エージェントの作業開始前に用意される。IDE の Copilot だけを使う場合は不要。
 3. **人の承認が必須の範囲**：`.github/CODEOWNERS.example` を `.github/CODEOWNERS` に名前を変えて `@OWNER` を置き換え、ブランチ保護で「Require review from Code Owners」を有効にする。guard のルール・ベースライン・例外、ArchUnit と PMD のルール、AI へのルールの変更に、人の承認が必要になる。
 
 ## Copilot には効かないもの

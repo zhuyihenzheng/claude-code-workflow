@@ -187,9 +187,9 @@ printf '%s\n' '{"stop_hook_active":false}' | python3 .claude/hooks/verify-stop.p
 | `project/.github/workflows/claude.yml` | `@claude` 评论/评审/新 issue 触发，可修改代码；默认 20 轮、5 美元、20 分钟。**提交后即生效**，未配置 App 与密钥时每次 `@claude` 都会触发一次失败的 job |
 | `project/.github/workflows/ci.yml.example` | 导入方自己的构建门禁：`sync_rules.py --check` 与 `./mvnw -B verify`。不调用任何 AI 服务，改名为 `ci.yml` 并设为 required check 后才构成合并门禁 |
 | `project/.github/workflows/claude-review.yml.example` | 明确需要自动评审时才改名为 `.yml`；带独立 prompt，只评审同仓库非草稿 PR，结果在 Actions 日志；15 轮、3 美元、20 分钟 |
-| `project/.github/workflows/copilot-setup-steps.yml.example` | 使用 GitHub Copilot 云端 agent 时改名为 `copilot-setup-steps.yml` 并合并到默认分支：在 agent 开始前装好 Python 转换依赖、Playwright 与 Chromium、Maven 依赖。不调用模型 |
+| `project/.github/workflows/copilot-setup-steps.yml.example` | 只在使用 GitHub Copilot 云端 agent 时需要，默认不安装，另用 `--with-copilot-cloud-agent` 安装；改名为 `copilot-setup-steps.yml` 并合并到默认分支后，在 agent 开始前装好 Python 转换依赖、Playwright 与 Chromium、Maven 依赖。不调用模型 |
 
-安装脚本默认把四者列为 `optional` 而不复制；确认要用 GitHub 自动化后用 `--with-workflows` 安装。两个 Claude workflow 保留 action 默认的触发者写权限检查与 bot 限制。预算数字是模板起点，按团队调整。美元限制不能替代账号/组织支出控制。
+安装脚本默认把这些都列为 `optional` 而不复制。前三个确认要用 GitHub 自动化后用 `--with-workflows` 安装；Copilot 云端 agent 的环境与之分开，不随 `--with-workflows` 安装。两个 Claude workflow 保留 action 默认的触发者写权限检查与 bot 限制。预算数字是模板起点，按团队调整。美元限制不能替代账号/组织支出控制。
 
 交互模板的 `id-token: write` 用于默认 GitHub App 认证；`additional_permissions: actions: read` 与 job 的同名权限一并配置，App 安装也须允许。自动评审模板显式传入只读 `${{ github.token }}` 作为 `github_token` 和 `GH_TOKEN`，不使用 App/OIDC；先通过 `gh pr view/diff` 检查读取权限，失败就终止，不调用模型。API key 使用 `anthropic_api_key`；订阅 OAuth 改成 `claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}`。不能只换 Secret 名而保留错误的 input。
 

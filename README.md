@@ -60,6 +60,7 @@ python3 scripts/install.py project /path/to/your-project --diff   # 预演，并
 python3 scripts/install.py project /path/to/your-project --apply  # 写入
 python3 scripts/install.py project /path/to/your-project --apply --with-screen-tests   # 连同画面试验（midscene-poc）
 python3 scripts/install.py project /path/to/your-project --apply --with-archunit        # 连同 ArchUnit 分层测试（需按 config/quality/pom-snippet.xml 改 pom）
+python3 scripts/install.py project /path/to/your-project --apply --with-copilot-cloud-agent   # 仅在使用 Copilot 云端 agent 时：环境准备 workflow
 python3 scripts/install.py doctor /path/to/your-project           # 导入后检查：TODO 是否填完、规则是否同步、guard 是否通过、配置有无风险
 python3 scripts/install.py user --apply                           # 个人级 skills → ~/.claude/skills
 ```
