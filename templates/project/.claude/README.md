@@ -13,6 +13,8 @@
 | `agents/code-reviewer.md` | 読み取り専用のレビュー用サブエージェント | Bash を持たないため、呼び出し側が diff を渡す |
 | `skills/spring-endpoint/` | エンドポイント／画面フラグメント追加の標準手順 | TODO の参考パスをプロジェクトの実例に置き換える |
 | `skills/change-flow/` | 改修の標準手順（設計書 → 実装 → 単体テスト → 画面試験 → 試験書） | 画面試験を導入していない場合は、該当ステップを `htmx-check.mjs` で代替する |
+| `skills/correct/` | 修正指示を設計・型・guard のルール・テストに変える手順 | ルールは `../config/guard/rules.json` に追加する |
+| `skills/feature-map/` | 機能マップ（`../docs/feature-map/`）の作成・更新 | 画面を変更した PR で該当する機能ファイルも更新する |
 | `hooks/verify-stop.py` | Stop hook の参考サンプル（**未登録**） | 下記「Hooks」を参照 |
 | `../.mcp.json` | MCP サーバー（Context7、Playwright） | 使用しないサーバーは削除し、認証情報は環境変数で渡す |
 
@@ -22,6 +24,14 @@
 - Maven は `compile` / `test` / `verify` の完全一致のみを許可している。`Bash(./mvnw *)` のような広い許可は deploy や任意のプラグイン実行も通すため追加しない。
 - deny／ask は Claude Code の組み込みツールに対する制御であり、プロセスの隔離ではない。任意のスクリプト、MCP、hooks の権限は別途管理する（OS のサンドボックス、最小権限の認証情報）。
 - マイグレーションのディレクトリは deny ではなく ask としている。新規追加は確認のうえで行い、マージ済みファイルの不変性はマイグレーションツールと CI で検証する。
+
+## 決定的チェック（guard）
+
+- `python3 scripts/guard.py` は `config/guard/rules.json` のルールでコードを検査する。終了コード 0 = 違反なし、1 = 違反あり、2 = ルールまたは設定の誤り（検査未完了であり、合格ではない）。CI でも同じコマンドを実行する。
+- 導入時に既存の違反が多い場合は、人が一度だけ `python3 scripts/guard.py --init-baseline` を実行し、現状を `config/guard/baseline.json` に記録してコミットする。以後、件数は縮小だけができる（`--update-baseline`）。
+- 例外は違反行またはその直前の行に `guard:allow <ルールID> until=YYYY-MM-DD by=<承認者> -- <理由>` と書く。期限は 1 年以内で、期限が切れると失敗する。承認者は人であり、エージェントには書かせない。
+- 検査、`--list`、`--update-baseline` は許可している。`--init-baseline` の実行と `config/guard/baseline.json` の編集は ask としている。
+- ルールの追加は `correct` skill の手順で行う。`examples.bad` には実際にあった誤りを入れ、`examples.good` には誤検知しやすい正しい書き方を入れる。どちらかが期待どおりでなければ guard は終了コード 2 で止まる。
 
 ## 画面試験と Excel の修正
 

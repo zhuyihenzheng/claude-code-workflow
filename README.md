@@ -19,6 +19,7 @@
 1. **一份短而准的 `AGENTS.md`**（目标 <150 行，分团队共通规则与本系统固有信息）；CLAUDE.md 导入它，Copilot 入口引用它并保留必守摘要；
 2. **一个可判定的验证回路**（JUnit/Testcontainers + `./mvnw verify` + Playwright 打开真实页面验证 HTMX/JSP 渲染）——没有回路，AI 写得再快也只是把 review 压力转嫁给人；
 3. **可自动检查的约束落到工具与 CI**：permissions 限制匹配工具，验证命令显式执行；模板不启用任何 hooks，进程隔离与最小凭据另行配置，合并门禁由 CI/分支保护执行。
+4. **纠正一次，检查永久**：人纠正过的错误落到设计、类型、`guard.py` 规则或测试上，而不是再往提示词里加一行；评审从读 diff 改为先看验证证据（见 [15](docs/15-纠正变成检查.md)）。
 
 ## 本手册的结构
 
@@ -37,6 +38,7 @@
 | [11 · Excel 设计书](docs/11-Excel设计书.md) | 省 token 的读取方案：工具实测比较、`xlsx2ai.py` 增量转换（sheet JSON + Mermaid 流程图）、MCP 的定位 |
 | [14 · 改修流程与画面试验](docs/14-改修流程与画面试验.md) | 设计书 → 实现 → 测试 → 画面试验 → 试验书的一条流程；整合 midscene-poc；用变更指示安全地改 Excel |
 | [13 · 控制矩阵](docs/13-控制矩阵.md) | 每条要求写在哪、谁拦、谁证明、还缺什么；导入后的 `doctor` 检查 |
+| [15 · 纠正变成检查](docs/15-纠正变成检查.md) | 解读演讲「All Code Is Slop (Except Mine)」：倒置的信任金字塔；`guard.py` 确定性检查、`correct` 流程、功能地图、评审看证据；刻意不做的自动合并 |
 | [templates/](templates/README.md) | 模板的前置条件、安装规则、权限语义、可选 hook 与 workflow 的说明 |
 | [templates/user/](templates/user/README.md) | 个人级（`~/.claude`）推荐：插件 / mods 安装清单、3 个中文触发的通用 skill |
 
@@ -57,7 +59,7 @@ python3 scripts/install.py project /path/to/your-project          # 预演：只
 python3 scripts/install.py project /path/to/your-project --diff   # 预演，并打印与已有文件的差异
 python3 scripts/install.py project /path/to/your-project --apply  # 写入
 python3 scripts/install.py project /path/to/your-project --apply --with-screen-tests   # 连同画面试验（midscene-poc）
-python3 scripts/install.py doctor /path/to/your-project           # 导入后检查：TODO 是否填完、规则是否同步、配置有无风险
+python3 scripts/install.py doctor /path/to/your-project           # 导入后检查：TODO 是否填完、规则是否同步、guard 是否通过、配置有无风险
 python3 scripts/install.py user --apply                           # 个人级 skills → ~/.claude/skills
 ```
 
@@ -73,12 +75,18 @@ CLAUDE.md                         @AGENTS.md + Claude Code 专属补充
 .claude/agents/code-reviewer.md   只读评审子代理
 .claude/skills/spring-endpoint/   新增接口 / 页面片段的标准流程
 .claude/skills/change-flow/       改修的标准流程：设计书 → 实现 → 单体测试 → 画面试验 → 试验书
+.claude/skills/correct/           被纠正后的标准流程：把错误落到设计、类型、guard 规则或测试上
+.claude/skills/feature-map/       功能地图的创建与更新
 .claude/hooks/verify-stop.py      Stop hook 参考样例（未注册）
 .claude/README.md                 给人看的配置说明（不进会话上下文）
 .github/copilot-instructions.md   Copilot 入口摘要
 .github/instructions/             由 rules 生成的 Copilot 路径指令
+.github/pull_request_template.md  验证证据在前的 PR 模板
+config/guard/rules.json           guard 规则：每条带修法、来源与真实错误样例（起始 10 条）
+docs/feature-map/README.md        功能地图的书式：一个功能一个文件，命令与合格结果
 .mcp.json                         Context7 + 隔离的 Playwright
 scripts/sync_rules.py             rules → Copilot 指令的同步与 --check
+scripts/guard.py                  确定性检查：新违规、过期例外、写坏的规则即失败；既有违规只减不增
 scripts/htmx-check.mjs            真实浏览器验证 HTMX 片段替换（含登录态、会话失效）
 scripts/xlsx2ai.py                Excel 设计书 → 按 sheet 拆分的 JSON / Mermaid
 scripts/xlsx_patch.py             按变更指示改 Excel：只动指定的单元格，其余逐字节不变
@@ -101,6 +109,7 @@ python3 -m unittest discover -s tests -v
 | 固定版本的 Playwright MCP 与 DBHub：MCP 握手并列出工具（Ubuntu）；workflow 文件：actionlint | 两个 MCP server 的实际浏览器操作与真实数据库 |
 | 画面试验：示例应用上从 GitHub 按 SHA 安装框架并实际运行；`xlsx_patch.py` 改写运行生成的试验结果（Ubuntu） | 真实业务项目上的画面试验；`change-flow` 在真实改修任务上的表现 |
 | Stop hook 参考样例：模拟与真实 Maven（仅 POSIX） | Copilot 各入口是否读取 AGENTS.md 与路径指令 |
+| `guard.py`：单元测试（三平台）；示例应用上通过、注入真实错误后报出修法；功能地图里的命令在运行中的应用上逐条执行（Ubuntu） | 起始规则在真实业务代码上的误报率；`correct` 在真实纠正上的表现 |
 
 本地测试不调用 Claude API；缺少 Playwright 时浏览器测试会跳过，CI 中强制执行。逐轮的问题与修复记录见 [09 · 审查与修复](docs/09-审查与修复.md)，Windows 搭建见 [02 · 基础搭建](docs/02-基础搭建.md#6-windows-两条路径)。
 

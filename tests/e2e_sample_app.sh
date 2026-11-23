@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # End-to-end check of the templates against a real Spring Boot + JSP + HTMX app.
 # Runs in CI (needs JDK 21, Maven, Node with playwright + htmx.org installed in the repo root).
-# Steps: install templates -> ./mvnw verify -> Stop hook (pass + real compile failure)
-#        -> start the app -> htmx-check.mjs (success, 422 re-render, escaping)
+# Steps: install templates -> guard (pass + real past mistakes) -> ./mvnw verify -> Stop hook (pass + real compile failure)
+#        -> start the app -> htmx-check.mjs (success, 422 re-render, escaping) -> feature map recipes
 #        -> screen tests (framework installed from GitHub at the pinned commit) -> xlsx_patch on the generated results.
 set -euo pipefail
 
@@ -34,6 +34,29 @@ python "$REPO/scripts/install.py" project "$WORK" --with-screen-tests --apply
 python "$REPO/scripts/install.py" project "$WORK" --with-screen-tests | tee "$OUT/install-second-run.txt"
 grep -q 'create: 0, merge: 0' "$OUT/install-second-run.txt"
 python scripts/sync_rules.py --check
+
+step "guard: the sample app passes the template rules"
+python scripts/guard.py | tee "$OUT/guard-pass.txt"
+grep -q 'guard: OK' "$OUT/guard-pass.txt"
+
+step "guard: a mapper injected into a controller and a scriptlet fail with their fix (exit 1)"
+CONTROLLER=src/main/java/com/example/demo/OrderController.java
+RESULT_JSP=src/main/webapp/WEB-INF/jsp/fragments/order-result.jsp
+cp "$CONTROLLER" "$OUT/OrderController.java.orig" && cp "$RESULT_JSP" "$OUT/order-result.jsp.orig"
+sed -i -e 's/^import jakarta.servlet.http.HttpServletResponse;/import com.example.demo.mapper.OrderMapper;\n&/' \
+  -e 's/^public class OrderController {/&\n    @Autowired\n    private OrderMapper orderMapper;/' "$CONTROLLER"
+printf '%s\n' '<p><%= request.getParameter("name") %></p>' >> "$RESULT_JSP"
+set +e
+python scripts/guard.py > "$OUT/guard-fail.txt"
+code=$?
+set -e
+cat "$OUT/guard-fail.txt"
+test "$code" -eq 1
+grep -q "^$CONTROLLER:3: \[controller-no-persistence\] " "$OUT/guard-fail.txt"
+grep -q "^$CONTROLLER:15: \[java-no-field-injection\] .*コンストラクタの引数で受け取る" "$OUT/guard-fail.txt"
+grep -q "^$RESULT_JSP:[0-9]*: \[jsp-no-scriptlet\] " "$OUT/guard-fail.txt"
+cp "$OUT/OrderController.java.orig" "$CONTROLLER" && cp "$OUT/order-result.jsp.orig" "$RESULT_JSP"
+python scripts/guard.py > /dev/null
 
 step "./mvnw verify (JUnit + MockMvc)"
 ./mvnw -B -q verify
@@ -88,6 +111,16 @@ check --click '#submit' --contains '登録しました' --timeout 3000
 code=$?
 set -e
 test "$code" -eq 1
+
+step "feature map: every recipe in docs/feature-map runs and leaves its evidence"
+grep -ho '`node scripts/htmx-check.mjs [^`]*`' docs/feature-map/*.md | tr -d '`' > "$OUT/feature-map-recipes.txt"
+test "$(wc -l < "$OUT/feature-map-recipes.txt")" -ge 3
+while IFS= read -r recipe; do
+  printf '+ %s\n' "$recipe"
+  eval "$recipe"
+done < "$OUT/feature-map-recipes.txt"
+test -f target/evidence/S01/S01-1.png && test -f target/evidence/S01/S01-2.png && test -f target/evidence/S01/S01-3.png
+cp -R target/evidence "$OUT/feature-map-evidence"
 
 step "screen tests: install the pinned framework"
 cd "$WORK/screen-tests"

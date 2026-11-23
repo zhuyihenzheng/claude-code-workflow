@@ -21,7 +21,8 @@ Existing files are never overwritten:
 
 ``doctor`` checks a project that already has the templates: placeholders left in
 AGENTS.md, the CLAUDE.md import, permission rules, MCP servers, generated Copilot
-instructions and tracked secrets. It only reads.
+instructions, the guard checks and the rules AGENTS.md says they enforce, the
+feature map, and tracked secrets. It only reads.
 
 Exit code: 0 on success, 1 if a file could not be written or ``doctor`` found a failure.
 
@@ -333,6 +334,8 @@ def doctor(target):
         add('ok' if result.returncode == 0 else 'fail', '.github/instructions/ matches .claude/rules/' if result.returncode == 0
             else '.github/instructions/ is out of sync with .claude/rules/: run scripts/sync_rules.py')
 
+    doctor_guard(target, agents, add)
+
     git = shutil.which('git')
     if git and (target / '.git').exists():
         tracked = subprocess.run([git, '-C', str(target), 'ls-files', '--', '.claude/settings.local.json', 'CLAUDE.local.md',
@@ -341,6 +344,39 @@ def doctor(target):
         add('fail' if tracked else 'ok', f'tracked by git but must stay local: {tracked}' if tracked
             else 'no local settings or .env files are tracked by git')
     return findings
+
+
+def doctor_guard(target, agents, add):
+    guard = target / 'scripts/guard.py'
+    rules_path = target / 'config/guard/rules.json'
+    if not guard.is_file() or not rules_path.is_file():
+        add('warn', 'scripts/guard.py or config/guard/rules.json is missing: corrections stay prose that nothing enforces')
+        return
+    result = subprocess.run([sys.executable, str(guard), '--root', str(target)], capture_output=True, text=True,
+                            encoding='utf-8', errors='replace', env={**os.environ, 'PYTHONIOENCODING': 'utf-8'})
+    last = (result.stdout.strip().splitlines() or result.stderr.strip().splitlines() or [''])[-1]
+    if result.returncode == 0:
+        add('ok', 'guard passes: ' + last)
+    elif result.returncode == 1:
+        hint = ('; a person accepts existing violations with scripts/guard.py --init-baseline'
+                if not (target / 'config/guard/baseline.json').is_file() else '')
+        add('fail', 'guard reports violations (run python3 scripts/guard.py)' + hint)
+    else:
+        add('fail', 'guard could not run its rules: ' + (result.stderr.strip() or last))
+    try:
+        ids = {rule.get('id') for rule in json.loads(rules_path.read_text(encoding='utf-8')).get('rules', [])}
+    except (ValueError, AttributeError):
+        return
+    tagged = set()
+    for tag in re.findall(r'〔guard:([^〕]*)〕', agents or ''):
+        tagged.update(part.strip() for part in tag.split(',') if re.fullmatch(r'[a-z0-9]+(?:-[a-z0-9]+)*', part.strip()))
+    unknown = sorted(tagged - ids)
+    add('fail' if unknown else 'ok', f'AGENTS.md tags guard rules that do not exist: {unknown}' if unknown
+        else f'AGENTS.md tags {len(tagged)} guard rule(s), all defined')
+    feature_map = target / 'docs/feature-map'
+    features = [p for p in feature_map.glob('*.md') if p.name != 'README.md'] if feature_map.is_dir() else []
+    add('ok' if features else 'warn', f'feature map lists {len(features)} feature(s)' if features
+        else 'docs/feature-map/ has no feature files: agents and reviewers have no shared names or recipes for the screens')
 
 
 def main(argv=None):

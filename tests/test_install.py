@@ -267,6 +267,12 @@ class InstallTests(unittest.TestCase):
         code, out, _ = run('doctor', self.target)
         self.assertEqual(code, 0, out)
         self.assertIn('fail: 0', out)
+        self.assertRegex(out, r'warn\s+docs/feature-map/ has no feature files')
+        (self.target / 'docs/feature-map/S01-order-new.md').write_text('# S01 注文登録\n', encoding='utf-8')
+        code, out, _ = run('doctor', self.target)
+        self.assertEqual(code, 0, out)
+        self.assertRegex(out, r'ok\s+guard passes')
+        self.assertRegex(out, r'ok\s+AGENTS\.md tags \d+ guard rule\(s\), all defined')
         # The only warnings left are the remote MCP services the template enables by default, if any.
         remote = {name for name, server in json.loads((PROJECT / '.mcp.json').read_text(encoding='utf-8'))['mcpServers'].items()
                   if server.get('url')}
@@ -296,6 +302,25 @@ class InstallTests(unittest.TestCase):
         self.assertTrue(any("'docs' is a remote service" in m for m in levels['warn']))
         self.assertTrue(any("'loose' is started with npx without a pinned version" in m for m in levels['warn']))
         self.assertFalse(any("'pinned'" in m for m in found))
+
+    def test_doctor_runs_guard_and_checks_the_rule_ledger(self):
+        run('project', self.target, '--apply')
+        controller = self.target / 'src/main/java/com/example/OrderController.java'
+        controller.parent.mkdir(parents=True)
+        controller.write_text('class OrderController {\n    @Autowired\n    private OrderService s;\n}\n', encoding='utf-8')
+        agents = self.target / 'AGENTS.md'
+        agents.write_text(agents.read_text(encoding='utf-8') + '- 架空の規約。〔guard: no-such-rule, jsp-no-scriptlet〕\n',
+                          encoding='utf-8')
+        found = self.doctor()
+        self.assertEqual(found['guard reports violations (run python3 scripts/guard.py); a person accepts existing '
+                               'violations with scripts/guard.py --init-baseline'], 'fail')
+        self.assertEqual(found["AGENTS.md tags guard rules that do not exist: ['no-such-rule']"], 'fail')
+        rules = self.target / 'config/guard/rules.json'
+        rules.write_text('{"rules": [{"id": "x"}]}', encoding='utf-8')
+        self.assertTrue(any(m.startswith('guard could not run its rules') and lv == 'fail' for m, lv in self.doctor().items()))
+        rules.unlink()
+        self.assertEqual(self.doctor()['scripts/guard.py or config/guard/rules.json is missing: corrections stay prose '
+                                       'that nothing enforces'], 'warn')
 
     def test_doctor_flags_tracked_local_files_and_writes_nothing(self):
         git = shutil.which('git')
