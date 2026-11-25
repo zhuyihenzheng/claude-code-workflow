@@ -40,9 +40,13 @@ python3 scripts/install.py doctor /path/to/your-project           # 導入後の
 | `create` | 存在しないファイルをコピーする |
 | `merge` | `settings.json` / `.mcp.json` は不足しているルールだけを追加し、`.gitignore` / `.gitattributes` は不足している行だけを追加する |
 | `conflict` | 内容が異なるファイル、またはシンボリックリンク。変更しないため、`--diff` で確認して手動でマージする |
-| `optional` | GitHub workflow。コミットした時点で有効になり、シークレットが必要なため、`--with-workflows` を指定した場合のみコピーする |
+| `optional` | 画面試験、ArchUnit、workflow などの選択項目。導入する場合は表示されたフラグを指定する |
 
-導入後は、`AGENTS.md` の「本システム固有情報」の TODO（バージョン、コマンド、画面の確認手順）を記入します。設定ファイルの構成は、導入先の `.claude/README.md` に日本語で記載しています。
+### 初回の動作確認
+
+1. 導入先の `AGENTS.md` に JDK、ビルドコマンド、参照する画面と起動方法を記入し、インストーラーの `conflict` を確認します。このリポジトリで `python3 scripts/install.py doctor /path/to/your-project` を実行し、`fail` を解消して各 `warn` の対応要否を判断します。
+2. 導入先のルートで `python3 scripts/sync_rules.py --check`、`python3 scripts/guard.py`、`./mvnw verify` を実行します。既存の CI にもこの 3 つを追加できます。GitHub Actions を新設する場合は [ci.yml.example](templates/project/.github/workflows/ci.yml.example) を参照してください。
+3. よく改修する画面を 1 つ選び、正常系と入力エラー時の期待結果を決めます。アプリを起動してブラウザーで両方を確認し、コマンド、アサーション、証跡の保存先を機能マップに記録します。[注文登録の記入例](tests/fixtures/sample-app/docs/feature-map/S01-order-new.md)を参照してください。
 
 ## 導入されるもの
 

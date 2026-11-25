@@ -1,6 +1,6 @@
 # 11 · Excel 设计书：转成人和 AI 都能读的 Markdown
 
-结论：**不要让 AI 直接读 .xlsx，也不要把 MCP 当主路径。** 用 [xlsx2ai.py](../templates/project/scripts/xlsx2ai.py) 在本地把设计书按 sheet 转成 Markdown：表格还原成 Markdown 表，地の文按缩进变成列表，用图形画的流程图以 Mermaid 嵌入。需要单元格位置时（写 `xlsx_patch.py` 的变更指示）再读同名的 JSON。转换不消耗模型 token，只重转 SHA-256 变化的文件。
+结论：**不要让 AI 直接读 .xlsx，也不要把 MCP 当主路径。** 用 [xlsx2ai.py](../templates/project/scripts/xlsx2ai.py) 在本地把设计书按 sheet 转成 Markdown：表格还原成 Markdown 表，地の文按缩进变成列表，用图形画的流程图以 Mermaid 嵌入。需要单元格位置时（写 `xlsx_patch.py` 的变更指示）再读同名的 JSON。转换不消耗模型 token，依据原本的 SHA-256 和生成文件清单决定是否重转。
 
 现成的 Excel→Markdown 工具在日式“方眼纸”设计书上，不是膨胀就是丢字。实测下来最好的做法是两步：用 ExStruct 取出非空单元格及其行列号，再按版面规则（左端对齐的列、表头、缩进、标题行）还原结构。
 
@@ -43,11 +43,13 @@ AI 的读取顺序：`specs-ai/index.md` → 该书 `index.md` → grep 定位 �
 ```bash
 pip install "exstruct==0.9.1" "excel2md==2.3.0"    # Python 3.11+
 python scripts/xlsx2ai.py                          # specs → specs-ai，只转变化的
-python scripts/xlsx2ai.py --check                  # CI：有过期或多余输出则退出码 1
+python scripts/xlsx2ai.py --check                  # CI：原本变更、删除或清单中的生成文件缺失时返回 1
 python scripts/xlsx2ai.py specs specs-ai --extract-media
 ```
 
-退出码：`0` 正常；`1` `--check` 发现过期；`2` 参数/依赖错误、输出目录名无法区分，或有书转换失败（其他书照常转换，失败的书保持过期）。输出格式变化时（本次加入 Markdown）会自动重新生成所有书。
+把 `specs-ai/` 用作生成文件的专用目录。提交生成物时一并提交 `.manifest.json`。旧版清单会在下次转换时更新。若总目次或清单里的 sheet、流程图、已提取图片丢失，`--check` 返回 `1`，运行转换命令即可补齐。完整性检查核对文件是否存在，生成文件的内容以重新转换为准。
+
+写入前脚本会检查输出目录是否冲突。例如同时存在 `db.xlsx` 和 `db/a.xlsx` 时，两本书会共用一棵输出目录，需要先调整其中一本的名称。已有同名目录且没有清单记录时，可指定新的输出目录。以上冲突及转换失败均返回 `2`，正常完成返回 `0`。
 
 输出目录名是原本去掉后缀的相对路径。`a.xlsx` 与 `a.xlsm` 并存（或文件名只差大小写）时，目录名改为 `a-xlsx` / `a-xlsm`，两本都会转换；目录名不保留 `.xlsx`，因为 settings 会 deny 读取它。
 

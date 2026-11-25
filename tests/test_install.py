@@ -3,6 +3,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -311,6 +312,17 @@ class InstallTests(unittest.TestCase):
         for name in remote:
             self.assertTrue(any(f"'{name}' is a remote service" in line for line in warnings), warnings)
 
+    def test_doctor_reports_missing_claude_entry_and_malformed_settings(self):
+        run('project', self.target, '--apply')
+        (self.target / 'CLAUDE.md').unlink()
+        (self.target / '.mcp.json').write_text('{"mcpServers": ["example"]}', encoding='utf-8')
+        (self.target / '.claude/settings.json').write_text('{"permissions": {"allow": 3}}', encoding='utf-8')
+        code, out, _ = run('doctor', self.target)
+        self.assertEqual(code, 1)
+        for filename in ('CLAUDE.md', '.mcp.json', '.claude/settings.json'):
+            self.assertRegex(out, r'fail\s+' + re.escape(filename))
+        self.assertIn('guard passes', out)
+
     def test_doctor_reports_drift_and_risky_configuration(self):
         run('project', self.target, '--apply')
         (self.target / 'CLAUDE.md').write_text('# mine\n', encoding='utf-8')
@@ -397,11 +409,14 @@ class InstallTests(unittest.TestCase):
         run('project', self.target, '--apply')
         (self.target / '.env').write_text('SECRET=x\n', encoding='utf-8')
         (self.target / '.env.example').write_text('SECRET=\n', encoding='utf-8')
+        (self.target / 'web module').mkdir()
+        (self.target / 'web module/.env.local').touch()
+        (self.target / 'web module/.env.example').touch()
         subprocess.run([git, 'init', '-q', str(self.target)], check=True, capture_output=True)
-        subprocess.run([git, '-C', str(self.target), 'add', '-f', '.env', '.env.example'], check=True, capture_output=True)
+        subprocess.run([git, '-C', str(self.target), 'add', '-f', '.env', '.env.example', 'web module'], check=True, capture_output=True)
         before = {p: p.read_bytes() for p in self.target.rglob('*') if p.is_file() and '.git' not in p.parts}
         found = self.doctor()
-        self.assertEqual(found["tracked by git but must stay local: ['.env']"], 'fail')
+        self.assertEqual(found["tracked by git but must stay local: ['.env', 'web module/.env.local']"], 'fail')
         self.assertEqual(before, {p: p.read_bytes() for p in self.target.rglob('*') if p.is_file() and '.git' not in p.parts})
         self.assertEqual(install.doctor(self.target / 'scripts')[0][0], 'fail', 'a directory without AGENTS.md')
 

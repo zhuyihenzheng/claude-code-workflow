@@ -7,14 +7,14 @@
 面向 **Java + Spring Boot 后端 / JSP、HTMX 或两者并用** 项目的 Claude Code 团队工作流，与 GitHub Copilot 共用一份 AGENTS.md。仓库包含三部分：
 
 - **手册**（[docs/](docs/)，中文）：规划、搭建、标准回路、工具选型、避坑；
-- **项目模板**（[templates/project/](templates/project/)，日文，面向日本团队）：规则、权限、子代理、skill、MCP、workflow 与两个验证脚本；
+- **项目模板**（[templates/project/](templates/project/)，日文，面向日本团队）：规则、权限、子代理、skill、MCP、workflow 与验证脚本；
 - **安装脚本**（[scripts/install.py](scripts/install.py)）：把模板非破坏性地合并进已有项目。
 
 它是可适配的起点，不是装上即用的插件：模板在 CI 的示例应用上跑通，你的业务项目仍需自行验收。已验证与未验证的范围见[验证范围](#验证范围)。
 
 ## 一句话结论
 
-先把三件事做对，其余都是增益：
+落地时优先做好以下四件事。
 
 1. **一份短而准的 `AGENTS.md`**（目标 <150 行，分团队共通规则与本系统固有信息）；CLAUDE.md 导入它，Copilot 入口引用它并保留必守摘要；
 2. **一个可判定的验证回路**（JUnit/Testcontainers + `./mvnw verify` + Playwright 打开真实页面验证 HTMX/JSP 渲染）——没有回路，AI 写得再快也只是把 review 压力转嫁给人；
@@ -66,6 +66,12 @@ python3 scripts/install.py user --apply                           # 个人级 sk
 ```
 
 脚本不覆盖、不删除已有文件：settings / `.mcp.json` 做规则并集，`.gitignore` / `.gitattributes` 只补缺失行，其余内容不同的文件列为 `conflict` 留给人工合并，目标文件是符号链接时不写穿。GitHub workflows 提交后即生效且需要密钥，默认不安装，加 `--with-workflows` 才复制。规则详见[模板说明](templates/README.md#安装与适配)。
+
+### 第一次导入怎样算跑通
+
+1. 在目标项目的 `AGENTS.md` 填好 JDK、构建命令、参考页面与启动方式，逐个处理安装器报告的 `conflict`。回到本仓库运行 `python3 scripts/install.py doctor /path/to/your-project`，处理所有 `fail`，按项目实际情况判断每条 `warn`。
+2. 在目标项目根目录运行 `python3 scripts/sync_rules.py --check`、`python3 scripts/guard.py` 和 `./mvnw verify`。如果项目已有 CI，可将这三项加入现有流水线。新建 GitHub Actions 门禁可参考 [ci.yml.example](templates/project/.github/workflows/ci.yml.example)。
+3. 选一张经常改动的页面，为一次成功操作和一次输入错误写下预期结果。启动应用，在浏览器执行两个用例，把命令、断言和截图路径写进功能地图。仓库里的[订单登记示例](tests/fixtures/sample-app/docs/feature-map/S01-order-new.md)展示了可重复执行的记录格式。
 
 安装后目标项目多出：
 

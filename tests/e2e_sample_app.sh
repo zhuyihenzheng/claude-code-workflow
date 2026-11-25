@@ -11,7 +11,7 @@ set -euo pipefail
 export LC_ALL=C.UTF-8 LANG=C.UTF-8
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
-WORK="${RUNNER_TEMP:-$(mktemp -d)}/sample-app"
+WORK="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/workflow-sample.XXXXXXXX")/sample-app"
 OUT="${E2E_OUTPUT:-$REPO/e2e-output}"
 APP_PID=""
 
@@ -25,7 +25,7 @@ trap cleanup EXIT
 
 step() { printf '\n=== %s\n' "$*"; }
 
-rm -rf "$WORK" && mkdir -p "$OUT" && cp -R "$REPO/tests/fixtures/sample-app" "$WORK"
+mkdir -p "$OUT" && cp -R "$REPO/tests/fixtures/sample-app" "$WORK"
 cd "$WORK"
 
 step "Generate Maven Wrapper"
@@ -47,8 +47,11 @@ step "guard: a mapper injected into a controller and a scriptlet fail with their
 CONTROLLER=src/main/java/com/example/demo/OrderController.java
 RESULT_JSP=src/main/webapp/WEB-INF/jsp/fragments/order-result.jsp
 cp "$CONTROLLER" "$OUT/OrderController.java.orig" && cp "$RESULT_JSP" "$OUT/order-result.jsp.orig"
-sed -i -e 's/^import jakarta.servlet.http.HttpServletResponse;/import com.example.demo.mapper.OrderMapper;\n&/' \
-  -e 's/^public class OrderController {/&\n    @Autowired\n    private OrderMapper orderMapper;/' "$CONTROLLER"
+sed -i.bak -e 's/^import jakarta.servlet.http.HttpServletResponse;/import com.example.demo.mapper.OrderMapper;\
+&/' \
+  -e 's/^public class OrderController {/&\
+    @Autowired\
+    private OrderMapper orderMapper;/' "$CONTROLLER"
 printf '%s\n' '<p><%= request.getParameter("name") %></p>' >> "$RESULT_JSP"
 set +e
 python scripts/guard.py > "$OUT/guard-fail.txt"
@@ -70,8 +73,11 @@ step "ArchUnit: a same-package repository used by the controller passes guard bu
 cp "$CONTROLLER" "$OUT/OrderController.java.orig"
 printf '%s\n' 'package com.example.demo;' '' 'class OrderRepository {' '    void save(String name) {' '    }' '}' \
   > src/main/java/com/example/demo/OrderRepository.java
-sed -i -e 's/^public class OrderController {/&\n\n    private final OrderRepository repository = new OrderRepository();/' \
-  -e 's/^        return "fragments\/order-result";/        repository.save(name);\n&/' "$CONTROLLER"
+sed -i.bak -e 's/^public class OrderController {/&\
+\
+    private final OrderRepository repository = new OrderRepository();/' \
+  -e 's/^        return "fragments\/order-result";/        repository.save(name);\
+&/' "$CONTROLLER"
 python scripts/guard.py > "$OUT/guard-same-package.txt"
 set +e
 ./mvnw -B test -Dtest=ArchitectureTest > "$OUT/archunit-fail.txt" 2>&1
@@ -181,7 +187,7 @@ EXCEL_MD="$WORK/specs-ai/設計書/sheets/注文登録.md"
 cp "$EXCEL_MD" "$OUT/excel-design.md"
 grep -q '^| 条件 | メッセージ |$' "$EXCEL_MD"
 cp site.mjs "$OUT/site.mjs.orig"
-sed -i "s#design: DIR + '../docs/設計書.md'#design: DIR + '../specs-ai/設計書/sheets/注文登録.md'#" site.mjs
+sed -i.bak "s#design: DIR + '../docs/設計書.md'#design: DIR + '../specs-ai/設計書/sheets/注文登録.md'#" site.mjs
 grep -q "specs-ai/設計書/sheets/注文登録.md" site.mjs
 node run.mjs --engine playwright --build-only | tee "$OUT/screen-tests-build-excel.txt"
 grep -q '設計書の 3 項目中 3 項目にケースあり' "$OUT/screen-tests-build-excel.txt"

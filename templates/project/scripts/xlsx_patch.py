@@ -57,7 +57,7 @@ def attr(tag, name):
 
 def split_ref(ref):
     found = re.fullmatch(r'([A-Z]{1,3})([1-9][0-9]*)', ref)
-    if not found:
+    if not found or col_index(found.group(1)) > 16384 or int(found.group(2)) > 1048576:
         raise PatchError(f'セル番地が不正です：{ref}')
     return found.group(1), int(found.group(2))
 
@@ -129,7 +129,7 @@ def style_table(zf):
 
 
 def read_cells(xml, strings):
-    """{ref: (text, style, has_formula)} for every cell element in the sheet XML."""
+    """{ref: (text, style, formula)} with the formula expression and its shared/array attributes."""
     cells = {}
     data = re.search(r'<sheetData\b[^>]*?(?:/>|>(.*)</sheetData>)', xml, re.S)
     if data is None:
@@ -150,32 +150,30 @@ def read_cells(xml, strings):
                 text = ''.join(t.text or '' for t in node.iter(f'{{{NS_MAIN}}}t'))
             else:
                 text = value.text or '' if value is not None else ''
-            cells[ref] = (text, attr(head, 's'), node.find(f'{{{NS_MAIN}}}f') is not None)
+            formula = node.find(f'{{{NS_MAIN}}}f')
+            cells[ref] = (text, attr(head, 's'), None if formula is None else (formula.text, sorted(formula.attrib.items())))
     return cells
 
 
-def merged_non_anchor(xml):
-    """Refs that lie inside a merged range but are not its top-left cell."""
-    blocked = set()
+def merged_ranges(xml):
+    ranges = []
     for found in re.finditer(r'<mergeCell\b[^>]*\bref="([A-Z]+)([0-9]+):([A-Z]+)([0-9]+)"', xml):
         c1, r1, c2, r2 = col_index(found.group(1)), int(found.group(2)), col_index(found.group(3)), int(found.group(4))
-        if (c2 - c1 + 1) * (r2 - r1 + 1) > 100000:
-            continue
-        blocked.update(f'{col_letters(c)}{r}' for c in range(c1, c2 + 1) for r in range(r1, r2 + 1)
-                       if (c, r) != (c1, r1))
-    return blocked
+        ranges.append((c1, r1, c2, r2))
+    return ranges
 
 
-def plan_sheet(spec, cells, blocked):
+def plan_sheet(spec, cells, merges):
     """Resolve one sheet's instructions to {ref: new text}. Raises PatchError without side effects."""
     sheet = spec['sheet']
     planned = {}
 
     def text_of(ref):
-        return planned.get(ref, cells.get(ref, ('', None, False))[0])
+        return planned.get(ref, cells.get(ref, ('', None, None))[0])
 
     def put(ref, change, label):
-        split_ref(ref)
+        letters, row = split_ref(ref)
+        col = col_index(letters)
         new = change['to'] if isinstance(change, dict) else change
         if not isinstance(new, str):
             raise PatchError(f'{sheet}!{ref}（{label}）：書き込む値は文字列で指定してください')
@@ -184,9 +182,9 @@ def plan_sheet(spec, cells, blocked):
         if isinstance(change, dict) and 'from' in change and text_of(ref) != change['from']:
             raise PatchError(f'{sheet}!{ref}（{label}）：現在の値が from と一致しません。'
                              f'from={change["from"]!r}、現在={text_of(ref)!r}')
-        if cells.get(ref, ('', None, False))[2]:
+        if cells.get(ref, ('', None, None))[2]:
             raise PatchError(f'{sheet}!{ref}（{label}）：数式セルには書き込みません')
-        if ref in blocked:
+        if any(c1 <= col <= c2 and r1 <= row <= r2 and (col, row) != (c1, r1) for c1, r1, c2, r2 in merges):
             raise PatchError(f'{sheet}!{ref}（{label}）：結合セルの左上以外には書き込みません')
         planned[ref] = new
 
@@ -249,7 +247,7 @@ def write_cells(xml, planned, cells):
         else:
             body, tail = row_xml[head_end:-len('</row>')], '</row>'
         for ref, text in sorted(changes, key=lambda change: col_index(split_ref(change[0])[0])):
-            style = cells.get(ref, ('', None, False))[1]
+            style = cells.get(ref, ('', None, None))[1]
             new, column = cell_xml(ref, text, style), col_index(split_ref(ref)[0])
             existing = next((c for c in CELL.finditer(body) if attr(c.group(0)[:c.group(0).index('>') + 1], 'r') == ref), None)
             if existing:
@@ -328,7 +326,7 @@ def build_plan(book, specs):
                 raise PatchError(f'シート「{spec["sheet"]}」がありません（シート：{"、".join(parts)}）')
             xml = zf.read(parts[spec['sheet']]).decode('utf-8')
             cells = read_cells(xml, strings)
-            planned = plan_sheet(spec, cells, merged_non_anchor(xml))
+            planned = plan_sheet(spec, cells, merged_ranges(xml))
             if planned:
                 plan[parts[spec['sheet']]] = (spec['sheet'], planned, cells, xml)
     return plan
@@ -399,18 +397,18 @@ def compare(before, after, expected=None):
             cells_a, cells_b = read_cells(xml_a, strings_a), read_cells(xml_b, strings_b)
             wanted = (expected or {}).get(name, {})
             for ref in sorted(set(cells_a) | set(cells_b), key=lambda r: (split_ref(r)[1], col_index(split_ref(r)[0]))):
-                old, new = cells_a.get(ref, ('', None, False)), cells_b.get(ref, ('', None, False))
+                old, new = cells_a.get(ref, ('', None, None)), cells_b.get(ref, ('', None, None))
                 label = f'{sheet_of[name]}!{ref}'
                 if old[0] != new[0]:
                     changes.append(f'{label}：{old[0]!r} → {new[0]!r}')
                     if expected is not None and wanted.get(ref) != new[0]:
                         problems.append(f'指示にない変更：{label}：{old[0]!r} → {new[0]!r}')
-                elif ref in cells_a and ref in cells_b and (old[2] != new[2] or style(styles_a, old[1]) != style(styles_b, new[1])):
+                if old[2] != new[2] or style(styles_a, old[1]) != style(styles_b, new[1]):
                     problems.append(f'書式または数式が変わっています：{label}')
-                elif (ref in cells_a) != (ref in cells_b) and ref not in wanted:
+                elif old[0] == new[0] and (ref in cells_a) != (ref in cells_b) and ref not in wanted:
                     problems.append(f'空のセルの{"追加" if ref in cells_b else "削除"}：{label}')
             for ref, text in wanted.items():
-                if cells_b.get(ref, ('', None, False))[0] != text:
+                if cells_b.get(ref, ('', None, None))[0] != text:
                     problems.append(f'指示どおりになっていません：{sheet_of[name]}!{ref}（期待 {text!r}、実際 {cells_b.get(ref, ("",))[0]!r}）')
             if outside_cells(xml_a) != outside_cells(xml_b):
                 problems.append(f'セル以外の定義（列幅・結合・枠固定など）が変わっています：{sheet_of[name]}')

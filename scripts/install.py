@@ -83,6 +83,15 @@ def dump_json(data):
     return json.dumps(data, indent=2, ensure_ascii=False) + '\n'
 
 
+def string_list(obj, key, label):
+    values = obj.get(key, [])
+    if not isinstance(values, list):
+        raise ValueError(f'"{label}" is not a list')
+    if not all(isinstance(value, str) for value in values):
+        raise ValueError(f'"{label}" contains non-string entries')
+    return values
+
+
 def merge_settings(existing, template):
     merged = dict(existing)
     notes = []
@@ -95,11 +104,7 @@ def merge_settings(existing, template):
         permissions = dict(current or {})
         for key in PERMISSION_LISTS:
             wanted = template['permissions'].get(key, [])
-            have = permissions.get(key, [])
-            if not isinstance(have, list):
-                raise ValueError(f'"permissions.{key}" is not a list')
-            if not all(isinstance(rule, str) for rule in have):
-                raise ValueError(f'"permissions.{key}" contains non-string rules')
+            have = string_list(permissions, key, f'permissions.{key}')
             added = [rule for rule in wanted if rule not in have]
             if added:
                 permissions[key] = have + added
@@ -299,7 +304,9 @@ def doctor(target):
         lines = len(agents.splitlines())
         add('warn' if lines >= 150 else 'ok', f'AGENTS.md: {lines} lines (budget: under 150, it is loaded into every session)')
     claude_md = text('CLAUDE.md')
-    if claude_md is not None:
+    if claude_md is None:
+        add('fail', 'CLAUDE.md is missing: the @AGENTS.md import is missing')
+    else:
         imported = '@AGENTS.md' in claude_md
         add('ok' if imported else 'fail', 'CLAUDE.md imports @AGENTS.md' if imported
             else 'CLAUDE.md exists without @AGENTS.md: Claude Code then ignores AGENTS.md')
@@ -312,12 +319,12 @@ def doctor(target):
         add('warn', '.claude/settings.json is missing: no shared permission rules')
     else:
         try:
-            settings = json.loads(raw)
-            permissions = settings.get('permissions') or {}
-            allow, deny = permissions.get('allow') or [], permissions.get('deny') or []
-        except (ValueError, AttributeError):
+            settings = json.loads(raw.lstrip('\ufeff'))
+            permissions = settings.get('permissions', {})
+            allow, deny, _ask = (string_list(permissions, key, f'permissions.{key}') for key in PERMISSION_LISTS)
+        except (ValueError, AttributeError) as error:
             settings = None
-            add('fail', '.claude/settings.json is not a valid settings object')
+            add('fail', f'.claude/settings.json is not a valid settings object: {error}')
         if settings is not None:
             broad = sorted(r for r in allow if isinstance(r, str) and re.search(r'mvnw(\.cmd)?(:| )\*\)$', r.strip()))
             add('warn' if broad else 'ok', f'broad Maven allow rule(s) {broad} also permit deploy and arbitrary goals'
@@ -331,16 +338,23 @@ def doctor(target):
     raw = text('.mcp.json')
     if raw is not None:
         try:
-            servers = json.loads(raw).get('mcpServers') or {}
-        except (ValueError, AttributeError):
-            servers = None
-            add('fail', '.mcp.json is not valid JSON')
-        for name, config in sorted((servers or {}).items()):
+            servers = json.loads(raw.lstrip('\ufeff')).get('mcpServers', {})
+            if not isinstance(servers, dict):
+                raise ValueError('mcpServers must be an object')
+        except (ValueError, AttributeError) as error:
+            servers = {}
+            add('fail', f'.mcp.json is not a valid MCP configuration: {error}')
+        for name, config in sorted(servers.items()):
             if not isinstance(config, dict):
+                add('fail', f'.mcp.json: server {name!r} must be an object')
                 continue
             if config.get('url'):
                 add('warn', f'MCP server {name!r} is a remote service: what is sent to it leaves the machine')
-            args = [a for a in config.get('args') or [] if isinstance(a, str)]
+            try:
+                args = string_list(config, 'args', f'mcpServers.{name}.args')
+            except ValueError as error:
+                add('fail', f'.mcp.json: {error}')
+                continue
             if config.get('command') == 'npx' and not any(re.search(r'@\d+\.\d+\.\d+', a) for a in args):
                 add('warn', f'MCP server {name!r} is started with npx without a pinned version')
 
@@ -357,11 +371,14 @@ def doctor(target):
 
     git = shutil.which('git')
     if git and (target / '.git').exists():
-        tracked = subprocess.run([git, '-C', str(target), 'ls-files', '--', '.claude/settings.local.json', 'CLAUDE.local.md',
-                                  '.env', '.env.*', ':(glob)**/.env'], capture_output=True, text=True).stdout.split()
-        tracked = sorted(t for t in tracked if not t.endswith('.env.example'))
-        add('fail' if tracked else 'ok', f'tracked by git but must stay local: {tracked}' if tracked
-            else 'no local settings or .env files are tracked by git')
+        result = subprocess.run([git, '-C', str(target), 'ls-files', '-z', '--', '.claude/settings.local.json', 'CLAUDE.local.md',
+                                 ':(glob)**/.env', ':(glob)**/.env.*'], capture_output=True)
+        if result.returncode:
+            add('fail', 'git ls-files failed: could not check tracked local files')
+        else:
+            tracked = sorted(os.fsdecode(p) for p in result.stdout.split(b'\0') if p and p.split(b'/')[-1] != b'.env.example')
+            add('fail' if tracked else 'ok', f'tracked by git but must stay local: {tracked}' if tracked
+                else 'no local settings or .env files are tracked by git')
     return findings
 
 

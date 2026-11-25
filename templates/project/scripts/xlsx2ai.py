@@ -15,8 +15,8 @@
 同じ名前のブック（a.xlsx と a.xlsm、大文字・小文字だけが異なる名前）は、出力先を
 <book>-xlsx / <book>-xlsm として区別する。それでも重複する場合は終了コード 2 を返す。
 
-変換はローカルで行い、モデルのトークンは消費しない。SHA-256 が変わったブックだけを
-再変換し、削除されたブックの出力も削除する。--check は書き込まずに古い出力を報告し、
+変換はローカルで行い、モデルのトークンは消費しない。原本が更新された場合や生成ファイルが欠けた場合は
+該当するブックを再変換し、削除されたブックの出力も削除する。--check は書き込まずに古い出力を報告し、
 古いものがあれば終了コード 1 を返す（CI 用）。
 
 依存：pip install "exstruct==0.9.1" "excel2md==2.3.0"
@@ -25,7 +25,7 @@ import argparse
 import hashlib
 import json
 import os
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 import re
 import shutil
 import subprocess
@@ -43,7 +43,7 @@ TOOL_CODE = {
     'excel2md': 'import sys; from excel2md.cli import main; sys.exit(main())',
 }
 # Bump when the output layout changes so every book is regenerated.
-FORMAT_VERSION = 2
+FORMAT_VERSION = 3
 
 
 class ConversionError(RuntimeError):
@@ -190,27 +190,30 @@ def row_cells(row):
     return [(col, value) for col, value in items if value]
 
 
-def table_header(rows):
-    """(列ごとの見出し, 見出しの行数)。rows が表でなければ None。"""
-    first = rows[0][1]
+def table_at(rows, i):
+    """Read one header and consume matching body rows up to the first gap or mismatch."""
+    if i + 1 >= len(rows) or rows[i + 1][0] - rows[i][0] > MAX_GAP + 1:
+        return None
+    first, second = rows[i][1], rows[i + 1][1]
     if len(first) < 2 or MARKER.match(first[0][1]):
         return None
     start = first[0][0]
-    labels, body, count = dict(first), rows[1:], 1
-    if body and body[0][1][0][0] > start and len(body[0][1]) >= 2:
-        sub, parent, merged = dict(body[0][1]), '', {}
+    labels, count = dict(first), 1
+    if second[0][0] > start and len(second) >= 2:
+        sub, parent, merged = dict(second), '', {}
         for col in sorted(set(labels) | set(sub)):
             parent = labels.get(col, parent)
             merged[col] = f'{parent}/{sub[col]}' if col in sub and parent else sub.get(col) or labels[col]
-        labels, body, count = merged, body[1:], 2
-    if not body:
-        return None
-    for _, cells in body:
-        if cells[0][0] != start or not {col for col, _ in cells} <= set(labels):
-            return None
+        labels, count = merged, 2
+    end = i + count
+    while end < len(rows) and rows[end][0] - rows[end - 1][0] <= MAX_GAP + 1:
+        cells = rows[end][1]
+        if cells[0][0] != start or any(col not in labels for col, _ in cells):
+            break
         if len(cells) == 1 and not MARKER.match(cells[0][1]):
-            return None
-    return labels, count
+            break
+        end += 1
+    return (end, (labels, count)) if end > i + count else None
 
 
 def is_title(text, marked=False):
@@ -229,20 +232,6 @@ def table_lines(rows, labels, count):
         return '| ' + ' | '.join(md_text(values.get(col, '')).replace('|', '\\|').replace('\n', '<br>') for col in cols) + ' |'
 
     return [line(labels), '|' + '---|' * len(cols)] + [line(dict(cells)) for _, cells in rows[count:]]
-
-
-def run_end(rows, i):
-    j = i + 1
-    while j < len(rows) and rows[j][0] - rows[j - 1][0] <= MAX_GAP + 1:
-        j += 1
-    return j
-
-
-def table_at(rows, i):
-    for k in range(run_end(rows, i), i + 1, -1):
-        if (header := table_header(rows[i:k])):
-            return k, header
-    return None
 
 
 def sheet_markdown(name, sheet_rows, flows=''):
@@ -352,49 +341,79 @@ def write_root_index(out, manifest):
 
 
 def load_manifest(out):
-    try:
-        data = json.loads((out / MANIFEST).read_text(encoding='utf-8'))
-        if data.get('format') == FORMAT_VERSION and isinstance(data.get('books'), dict):
-            return data
-    except (OSError, ValueError):
-        pass
-    return {'format': FORMAT_VERSION, 'books': {}}
+    path = out / MANIFEST
+    if not path.exists():
+        if (out / 'index.md').exists():
+            raise ConversionError(f'{path} がありません。既存の index.md を保護するため、別の出力先を指定してください。')
+        return {'format': FORMAT_VERSION, 'books': {}}
+    data = json.loads(path.read_text(encoding='utf-8'))
+    if not isinstance(data, dict) or not isinstance(data.get('books'), dict):
+        raise ConversionError(f'{path} の形式が不正です')
+    return data
+
+
+def validate_destinations(out, books, previous):
+    # Each book owns an entire directory (including when a deleted book is cleaned up).
+    keys = set(books) | set(previous)
+    folded = {key.casefold() for key in keys}
+    for key in sorted(keys):
+        rel = PurePosixPath(key)
+        if (not rel.parts or rel.as_posix() != key or '..' in rel.parts or rel.is_absolute()
+                or PureWindowsPath(key).anchor or '\\' in key or rel.parts[0].casefold() in ('index.md', MANIFEST)):
+            raise ConversionError(f'不正な出力先：{key!r}')
+        if any(parent.as_posix().casefold() in folded for parent in rel.parents):
+            raise ConversionError(f'ブックの出力先が入れ子になっています：{key}。別の出力先を指定するか原本名を変更してください。')
+        dest = out / key
+        if any((out / part).is_symlink() for part in (rel, *rel.parents)):
+            raise ConversionError(f'出力先にシンボリックリンクがあります：{dest}')
+        if dest.exists() and (key not in previous or not dest.is_dir()):
+            raise ConversionError(f'管理対象外の出力先があります：{dest}。別の出力先を指定してください。')
+    if len(keys) != len(folded):
+        raise ConversionError('大文字・小文字だけが異なる出力先があります。別の出力先を指定してください。')
 
 
 def run(src, out, check=False, extract_media=False, log=print):
-    src, out = Path(src), Path(out)
+    src, out = Path(src).resolve(), Path(out).resolve()
     if not src.is_dir():
         raise ConversionError(f'入力ディレクトリがありません：{src}')
+    if src.is_relative_to(out):
+        raise ConversionError('出力先に入力ディレクトリ自身やその親は指定できません')
+    for name in (MANIFEST, 'index.md'):
+        if (out / name).is_symlink():
+            raise ConversionError(f'出力先にシンボリックリンクがあります：{out / name}')
     manifest = load_manifest(out)
-    books = book_keys(src, find_books(src))
+    books = book_keys(src, [p for p in find_books(src) if not p.is_relative_to(out)])
+    validate_destinations(out, books, manifest['books'])
     stale, failures = [], []
     for key, path in books.items():
         digest = sha256(path)
         entry = manifest['books'].get(key)
-        if entry and entry['sha256'] == digest and (out / key / 'index.md').is_file() \
-                and (not extract_media or entry.get('media_extracted') or not entry.get('media')):
+        if (manifest.get('format') == FORMAT_VERSION and isinstance(entry, dict) and entry.get('sha256') == digest
+                and entry.get('files') and all((out / key / file).is_file() for file in entry['files'])
+                and (not extract_media or entry.get('media_extracted') or not entry.get('media'))):
             continue
         stale.append(key)
         if check:
             log(f'古い出力：{path}')
             continue
         dest = out / key
-        tmp = out / f'.{PurePosixPath(key).name}.tmp'
-        shutil.rmtree(tmp, ignore_errors=True)
-        try:
-            summary = convert(path, tmp, extract_media)
-            write_book_index(tmp, path.relative_to(src).as_posix(), summary)
-        except Exception as error:  # one broken book must not block the others
-            shutil.rmtree(tmp, ignore_errors=True)
-            reason = error if isinstance(error, ConversionError) else f'{type(error).__name__}: {error}'
-            failures.append(key)
-            log(f'失敗：{path}：{reason}')
-            continue
-        shutil.rmtree(dest, ignore_errors=True)
         dest.parent.mkdir(parents=True, exist_ok=True)
-        tmp.rename(dest)
+        with tempfile.TemporaryDirectory(dir=dest.parent) as staging:
+            tmp = Path(staging) / 'book'
+            try:
+                summary = convert(path, tmp, extract_media)
+                write_book_index(tmp, path.relative_to(src).as_posix(), summary)
+                files = sorted(p.relative_to(tmp).as_posix() for p in tmp.rglob('*') if p.is_file())
+            except Exception as error:  # one broken book must not block the others
+                reason = error if isinstance(error, ConversionError) else f'{type(error).__name__}: {error}'
+                failures.append(key)
+                log(f'失敗：{path}：{reason}')
+                continue
+            if dest.is_dir():
+                shutil.rmtree(dest)
+            tmp.rename(dest)
         manifest['books'][key] = {
-            'source': path.relative_to(src).as_posix(), 'sha256': digest,
+            'source': path.relative_to(src).as_posix(), 'sha256': digest, 'files': files,
             'sheet_count': len(summary['sheets']), 'chars': sum(r['md_chars'] for r in summary['sheets']),
             'flows': summary['flows'], 'media': summary['media'], 'media_extracted': extract_media,
         }
@@ -405,12 +424,18 @@ def run(src, out, check=False, extract_media=False, log=print):
         if check:
             log(f'原本のない出力：{out / key}')
             continue
-        shutil.rmtree(out / key, ignore_errors=True)
+        if (out / key).is_dir():
+            shutil.rmtree(out / key)
         del manifest['books'][key]
         log(f'削除：{out / key}')
+    missing_index = not (out / 'index.md').is_file()
     if check:
-        return 1 if stale else 0
-    if len(stale) > len(failures) or not (out / 'index.md').is_file():
+        if missing_index:
+            log(f"目次がありません：{out / 'index.md'}")
+        return 1 if stale or missing_index else 0
+    if len(stale) > len(failures) or missing_index:
+        if not failures:
+            manifest['format'] = FORMAT_VERSION
         out.mkdir(parents=True, exist_ok=True)
         write_root_index(out, manifest)
         (out / MANIFEST).write_text(json.dumps(manifest, ensure_ascii=False, indent=1, sort_keys=True) + '\n',
@@ -432,7 +457,7 @@ def main(argv=None):
     args = parser.parse_args(argv)
     try:
         return run(args.src, args.out, check=args.check, extract_media=args.extract_media)
-    except ConversionError as error:
+    except (ConversionError, OSError, ValueError) as error:
         print(f'エラー：{error}', file=sys.stderr)
         return 2
 

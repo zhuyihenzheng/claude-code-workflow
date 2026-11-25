@@ -139,6 +139,29 @@ class Xlsx2AiTests(unittest.TestCase):
         chars = sum(len(p.read_text(encoding='utf-8')) for p in (book / 'sheets').glob('*.md'))
         self.assertEqual(json.loads((self.out / xlsx2ai.MANIFEST).read_text(encoding='utf-8'))['books']['flow']['chars'], chars)
 
+    def test_check_and_repair_missing_index_and_sheet(self):
+        make_book(self.src / 'a.xlsx')
+        self.assertEqual(run(self.src, self.out)[0], 0)
+        for path in (self.out / 'index.md', self.out / 'a/sheets/表紙.md'):
+            path.unlink()
+            self.assertEqual(run(self.src, self.out, '--check')[0], 1, path)
+            self.assertFalse(path.exists())
+            self.assertEqual(run(self.src, self.out)[0], 0)
+            self.assertTrue(path.is_file())
+            self.assertEqual(run(self.src, self.out, '--check')[0], 0)
+
+    def test_overlapping_book_destinations_and_unmanaged_directories_are_preserved(self):
+        make_book(self.src / 'db.xlsx')
+        make_book(self.src / 'db/a.xlsx')
+        self.assertEqual(run(self.src, self.out)[0], 2)
+        self.assertFalse(self.out.exists())
+        (self.src / 'db/a.xlsx').unlink()
+        existing = self.out / 'db/team-notes.md'
+        existing.parent.mkdir(parents=True)
+        existing.write_text('notes', encoding='utf-8')
+        self.assertEqual(run(self.src, self.out)[0], 2)
+        self.assertEqual(existing.read_text(encoding='utf-8'), 'notes')
+
     def test_output_from_an_older_format_is_regenerated(self):
         make_book(self.src / 'a.xlsx')
         self.assertEqual(run(self.src, self.out)[0], 0)
