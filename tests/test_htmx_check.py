@@ -221,12 +221,16 @@ REAL_PAGE = ('<!doctype html><html><head><meta charset="utf-8">{config}<script s
              '<button id="go">go</button></form><div id="target">initial</div></body></html>')
 REAL_PAGES = {
     'ok.html': REAL_PAGE.format(config='', endpoint='/ok', target='#target'),
+    'sibling.html': REAL_PAGE.format(config='', endpoint='/ok', target='#sibling').replace(
+        'initial</div>', '登録しました</div><aside id="sibling"></aside>'),
+    'outer.html': REAL_PAGE.format(config='', endpoint='/outer', target='#target').replace('hx-post=', 'hx-swap="outerHTML" hx-post='),
     'missing-target.html': REAL_PAGE.format(config='', endpoint='/ok', target='#nope'),
     'invalid-default.html': REAL_PAGE.format(config='', endpoint='/invalid', target='#target'),
     'invalid-configured.html': REAL_PAGE.format(config=CONFIG_422, endpoint='/invalid', target='#target'),
     'login.html': REAL_PAGE.format(config='', endpoint='/login', target='#target'),
 }
 POST_RESPONSES = {
+    '/outer': (200, '<div id="target">initial</div>'),
     '/ok': (200, '<p>登録しました</p>'),
     '/invalid': (422, '<p class="error">入力エラー</p>'),
     '/login': (200, '<html><body><h1>ログイン</h1></body></html>'),
@@ -274,6 +278,14 @@ class RealHtmxTests(unittest.TestCase):
 
     def test_real_swap_passes(self):
         result = self.check('ok.html', '--contains', '登録しました', '--absent', 'ログイン')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_swap_in_an_unrelated_fragment_fails_even_if_text_already_matches(self):
+        result = self.check('sibling.html', '--contains', '登録しました')
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+
+    def test_outer_swap_with_identical_html_passes(self):
+        result = self.check('outer.html', '--contains', 'initial')
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_missing_hx_target_is_caught(self):

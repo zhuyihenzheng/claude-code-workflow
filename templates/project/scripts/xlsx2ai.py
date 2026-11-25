@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Excel 設計書を AI が少ないトークンで読める形式に変換する（増分変換）。
+"""Excel 設計書を AI と人が少ないトークンで読める形式に変換する（増分変換）。
 
     python scripts/xlsx2ai.py [SRC_DIR] [OUT_DIR] [--check] [--extract-media]
 
@@ -7,24 +7,25 @@
 
     OUT_DIR/index.md                 全ブックの目次（AI はここから読む）
     OUT_DIR/<book>/index.md          シート一覧（文字数・図形フロー・画像の有無）
-    OUT_DIR/<book>/sheets/<sheet>.json   ExStruct light：空セルを除いた値と行列番号
+    OUT_DIR/<book>/sheets/<sheet>.md     表は Markdown の表、地の文は字下げどおりの箇条書き（まずこれを読む）
+    OUT_DIR/<book>/sheets/<sheet>.json   ExStruct light：空セルを除いた値と行列番号（セル位置が必要なとき）
     OUT_DIR/<book>/flows/<sheet>.mmd     図形＋コネクタで描かれたフロー図（excel2md）
     OUT_DIR/<book>/media/*           --extract-media 指定時のみ：貼り付け画像（フロー図の画像など）
 
 同じ名前のブック（a.xlsx と a.xlsm、大文字・小文字だけが異なる名前）は、出力先を
 <book>-xlsx / <book>-xlsm として区別する。それでも重複する場合は終了コード 2 を返す。
 
-変換はローカルで行い、モデルのトークンは消費しない。SHA-256 が変わったブックだけを
-再変換し、削除されたブックの出力も削除する。--check は書き込まずに古い出力を報告し、
+変換はローカルで行い、モデルのトークンは消費しない。原本が更新された場合や生成ファイルが欠けた場合は
+該当するブックを再変換し、削除されたブックの出力も削除する。--check は書き込まずに古い出力を報告し、
 古いものがあれば終了コード 1 を返す（CI 用）。
 
-依存：pip install "exstruct==0.9.0" "excel2md==2.3.0"
+依存：pip install "exstruct==0.9.1" "excel2md==2.3.0"
 """
 import argparse
 import hashlib
 import json
 import os
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 import re
 import shutil
 import subprocess
@@ -42,7 +43,7 @@ TOOL_CODE = {
     'excel2md': 'import sys; from excel2md.cli import main; sys.exit(main())',
 }
 # Bump when the output layout changes so every book is regenerated.
-FORMAT_VERSION = 1
+FORMAT_VERSION = 3
 
 
 class ConversionError(RuntimeError):
@@ -61,7 +62,7 @@ def tool(name, *args):
     if result.returncode != 0:
         detail = (result.stderr or result.stdout).strip().splitlines()[-1:] or ['']
         if 'No module named' in detail[0]:
-            detail = [f'{name} が未インストールです（pip install "exstruct==0.9.0" "excel2md==2.3.0"）']
+            detail = [f'{name} が未インストールです（pip install "exstruct==0.9.1" "excel2md==2.3.0"）']
         raise ConversionError(f'{name} が失敗しました：{detail[0]}')
     return result
 
@@ -166,6 +167,108 @@ def extract_flows(path, sheets):
     return flows
 
 
+# シートの Markdown：ExStruct の行（空セルを除いた値と列番号）から、表と地の文を復元する。
+# 表：見出し行と、同じ左端の列から始まり見出し行の列に収まる行の並び（2 段の見出し、結合で生じた 2 行までの空行を許す）。
+#     値が 1 つだけの行（番号・記号を除く）は表の終わりとみなす。
+# 地の文：字下げ（左端の列）の深さに応じた箇条書き。番号や記号で始まる 1 セルの行は見出しにする。
+HEADING = re.compile(r'^(?:\d+(?:\.\d+)*[.．]?\s|[■□◆◇●【≪＜〈《\[])')
+BULLETS = {'・', '-', '－', '*', '＊', '●', '○'}
+MARKER = re.compile(r'^(?:[・※\-－*＊●○]|[①-⑳]|\(?\d+\)|[0-9]+[.．、]?)$')
+MAX_GAP = 2
+HTML_TAG = re.compile(r'<(?=[A-Za-z/!])')
+
+
+def cell_text(value):
+    if isinstance(value, float) and value.is_integer():
+        value = int(value)
+    text = str(value).strip()
+    return text[:-9] if re.fullmatch(r'\d{4}-\d{2}-\d{2} 00:00:00', text) else text
+
+
+def row_cells(row):
+    items = sorted((int(col), cell_text(value)) for col, value in row.get('c', {}).items())
+    return [(col, value) for col, value in items if value]
+
+
+def table_at(rows, i):
+    """Read one header and consume matching body rows up to the first gap or mismatch."""
+    if i + 1 >= len(rows) or rows[i + 1][0] - rows[i][0] > MAX_GAP + 1:
+        return None
+    first, second = rows[i][1], rows[i + 1][1]
+    if len(first) < 2 or MARKER.match(first[0][1]):
+        return None
+    start = first[0][0]
+    labels, count = dict(first), 1
+    if second[0][0] > start and len(second) >= 2:
+        sub, parent, merged = dict(second), '', {}
+        for col in sorted(set(labels) | set(sub)):
+            parent = labels.get(col, parent)
+            merged[col] = f'{parent}/{sub[col]}' if col in sub and parent else sub.get(col) or labels[col]
+        labels, count = merged, 2
+    end = i + count
+    while end < len(rows) and rows[end][0] - rows[end - 1][0] <= MAX_GAP + 1:
+        cells = rows[end][1]
+        if cells[0][0] != start or any(col not in labels for col, _ in cells):
+            break
+        if len(cells) == 1 and not MARKER.match(cells[0][1]):
+            break
+        end += 1
+    return (end, (labels, count)) if end > i + count else None
+
+
+def is_title(text, marked=False):
+    """見出しになる 1 セルの行。文（。で終わる）は見出しにしない。"""
+    return not text.endswith('。') and (not marked or bool(HEADING.match(text)))
+
+
+def md_text(text):
+    return HTML_TAG.sub(r'\\<', text)
+
+
+def table_lines(rows, labels, count):
+    cols = sorted(labels)
+
+    def line(values):
+        return '| ' + ' | '.join(md_text(values.get(col, '')).replace('|', '\\|').replace('\n', '<br>') for col in cols) + ' |'
+
+    return [line(labels), '|' + '---|' * len(cols)] + [line(dict(cells)) for _, cells in rows[count:]]
+
+
+def sheet_markdown(name, sheet_rows, flows=''):
+    """ExStruct light のシート 1 枚を Markdown にする。"""
+    rows = [(row['r'], cells) for row in sorted(sheet_rows, key=lambda row: row['r']) if (cells := row_cells(row))]
+    heading_cols = sorted({cells[0][0] for _, cells in rows if len(cells) == 1 and is_title(cells[0][1], True)})
+    out, stack, i = [f'# {md_text(name)}', ''], [], 0
+    while i < len(rows):
+        if (found := table_at(rows, i)):
+            k, (labels, count) = found
+            out += ([''] if out[-1] else []) + table_lines(rows[i:k], labels, count) + ['']
+            stack, i = [], k
+            continue
+        cells = rows[i][1]
+        if len(cells) > 1 and cells[0][1] in BULLETS:
+            cells = cells[1:]
+        joined = md_text(' '.join(value.replace('\n', ' ') for _, value in cells))
+        if len(rows[i][1]) == 1 and is_title(joined, True):
+            level = min(2 + heading_cols.index(cells[0][0]), 6)
+            out += ([''] if out[-1] else []) + ['#' * level + ' ' + joined, '']
+            stack = []
+        elif len(rows[i][1]) == 1 and is_title(joined) and table_at(rows, i + 1):
+            out += ([''] if out[-1] else []) + [f'**{joined}**']
+            stack = []
+        else:
+            col = rows[i][1][0][0]
+            while stack and stack[-1] > col:
+                stack.pop()
+            if not stack or stack[-1] < col:
+                stack.append(col)
+            out.append('  ' * (len(stack) - 1) + '- ' + joined)
+        i += 1
+    if flows:
+        out += ['', '```mermaid', flows.strip(), '```']
+    return '\n'.join(out).strip() + '\n'
+
+
 def convert(path, dest, extract_media):
     """Convert one workbook into dest (a fresh directory). Returns the per-book summary."""
     sheets_dir = dest / 'sheets'
@@ -189,8 +292,14 @@ def convert(path, dest, extract_media):
                 (dest / 'media' / PurePosixPath(name).name).write_bytes(zf.read(name))
     rows = []
     for json_file in sorted(sheets_dir.glob('*.json')):
-        rows.append({'sheet': json_file.stem, 'file': f'sheets/{json_file.name}',
-                     'chars': len(json_file.read_text(encoding='utf-8'))})
+        raw = json_file.read_text(encoding='utf-8')
+        data = json.loads(raw)
+        name = data.get('sheet_name') or json_file.stem
+        markdown = sheet_markdown(name, (data.get('sheet') or {}).get('rows') or [], flows.get(name, ''))
+        md_file = json_file.with_suffix('.md')
+        md_file.write_text(markdown, encoding='utf-8', newline='\n')
+        rows.append({'sheet': name, 'file': f'sheets/{json_file.name}', 'md': f'sheets/{md_file.name}',
+                     'chars': len(raw), 'md_chars': len(markdown)})
     return {'sheets': rows, 'drawings': drawings, 'flows': sorted(flows), 'media': len(media)}
 
 
@@ -202,14 +311,17 @@ def md_link(text, target):
 def write_book_index(dest, source_rel, summary):
     lines = [f'# {source_rel}', '',
              '生成物：`scripts/xlsx2ai.py`。手で編集しない。原本の Excel を直接読まず、必要なシートだけを開く。', '',
-             '| シート | ファイル | 文字数 | 図形フロー | 画像 |', '|---|---|---:|---|---:|']
+             '| シート | Markdown | JSON | 文字数 | 図形フロー | 画像 |', '|---|---|---|---:|---|---:|']
     for row in summary['sheets']:
         d = summary['drawings'].get(row['sheet'], {})
         mmd = f"flows/{safe_name(row['sheet'])}.mmd"
         flow = md_link(mmd, mmd) if row['sheet'] in summary['flows'] else ''
         sheet = row['sheet'].replace('|', '\\|')
-        lines.append(f"| {sheet} | {md_link(row['file'], row['file'])} | {row['chars']:,} | {flow} | {d.get('pictures', 0)} |")
-    lines += ['', 'シート JSON は空セルを除いた `{"r": 行, "c": {列: 値}}`（0 始まりの列番号）。結合セルの範囲は含まない。']
+        lines.append(f"| {sheet} | {md_link(row['md'], row['md'])} | {md_link(row['file'], row['file'])} | "
+                     f"{row['md_chars']:,} | {flow} | {d.get('pictures', 0)} |")
+    lines += ['', 'まず Markdown を読む。表は Markdown の表、地の文は字下げどおりの箇条書き、図形フローは Mermaid で入っている。',
+              'セルの位置が必要なとき（`xlsx_patch.py` の変更指示を書くときなど）だけ JSON を読む。'
+              'JSON は空セルを除いた `{"r": 行, "c": {列: 値}}`（0 始まりの列番号）で、結合セルの範囲は含まない。']
     if summary['flows']:
         lines.append('図形フローの分岐ラベル（はい／いいえ等）は独立ノードとして出ることがある。原本と照合して辺に付け直す。')
     if summary['media']:
@@ -229,50 +341,80 @@ def write_root_index(out, manifest):
 
 
 def load_manifest(out):
-    try:
-        data = json.loads((out / MANIFEST).read_text(encoding='utf-8'))
-        if data.get('format') == FORMAT_VERSION and isinstance(data.get('books'), dict):
-            return data
-    except (OSError, ValueError):
-        pass
-    return {'format': FORMAT_VERSION, 'books': {}}
+    path = out / MANIFEST
+    if not path.exists():
+        if (out / 'index.md').exists():
+            raise ConversionError(f'{path} がありません。既存の index.md を保護するため、別の出力先を指定してください。')
+        return {'format': FORMAT_VERSION, 'books': {}}
+    data = json.loads(path.read_text(encoding='utf-8'))
+    if not isinstance(data, dict) or not isinstance(data.get('books'), dict):
+        raise ConversionError(f'{path} の形式が不正です')
+    return data
+
+
+def validate_destinations(out, books, previous):
+    # Each book owns an entire directory (including when a deleted book is cleaned up).
+    keys = set(books) | set(previous)
+    folded = {key.casefold() for key in keys}
+    for key in sorted(keys):
+        rel = PurePosixPath(key)
+        if (not rel.parts or rel.as_posix() != key or '..' in rel.parts or rel.is_absolute()
+                or PureWindowsPath(key).anchor or '\\' in key or rel.parts[0].casefold() in ('index.md', MANIFEST)):
+            raise ConversionError(f'不正な出力先：{key!r}')
+        if any(parent.as_posix().casefold() in folded for parent in rel.parents):
+            raise ConversionError(f'ブックの出力先が入れ子になっています：{key}。別の出力先を指定するか原本名を変更してください。')
+        dest = out / key
+        if any((out / part).is_symlink() for part in (rel, *rel.parents)):
+            raise ConversionError(f'出力先にシンボリックリンクがあります：{dest}')
+        if dest.exists() and (key not in previous or not dest.is_dir()):
+            raise ConversionError(f'管理対象外の出力先があります：{dest}。別の出力先を指定してください。')
+    if len(keys) != len(folded):
+        raise ConversionError('大文字・小文字だけが異なる出力先があります。別の出力先を指定してください。')
 
 
 def run(src, out, check=False, extract_media=False, log=print):
-    src, out = Path(src), Path(out)
+    src, out = Path(src).resolve(), Path(out).resolve()
     if not src.is_dir():
         raise ConversionError(f'入力ディレクトリがありません：{src}')
+    if src.is_relative_to(out):
+        raise ConversionError('出力先に入力ディレクトリ自身やその親は指定できません')
+    for name in (MANIFEST, 'index.md'):
+        if (out / name).is_symlink():
+            raise ConversionError(f'出力先にシンボリックリンクがあります：{out / name}')
     manifest = load_manifest(out)
-    books = book_keys(src, find_books(src))
+    books = book_keys(src, [p for p in find_books(src) if not p.is_relative_to(out)])
+    validate_destinations(out, books, manifest['books'])
     stale, failures = [], []
     for key, path in books.items():
         digest = sha256(path)
         entry = manifest['books'].get(key)
-        if entry and entry['sha256'] == digest and (out / key / 'index.md').is_file() \
-                and (not extract_media or entry.get('media_extracted') or not entry.get('media')):
+        if (manifest.get('format') == FORMAT_VERSION and isinstance(entry, dict) and entry.get('sha256') == digest
+                and entry.get('files') and all((out / key / file).is_file() for file in entry['files'])
+                and (not extract_media or entry.get('media_extracted') or not entry.get('media'))):
             continue
         stale.append(key)
         if check:
             log(f'古い出力：{path}')
             continue
         dest = out / key
-        tmp = out / f'.{PurePosixPath(key).name}.tmp'
-        shutil.rmtree(tmp, ignore_errors=True)
-        try:
-            summary = convert(path, tmp, extract_media)
-            write_book_index(tmp, path.relative_to(src).as_posix(), summary)
-        except Exception as error:  # one broken book must not block the others
-            shutil.rmtree(tmp, ignore_errors=True)
-            reason = error if isinstance(error, ConversionError) else f'{type(error).__name__}: {error}'
-            failures.append(key)
-            log(f'失敗：{path}：{reason}')
-            continue
-        shutil.rmtree(dest, ignore_errors=True)
         dest.parent.mkdir(parents=True, exist_ok=True)
-        tmp.rename(dest)
+        with tempfile.TemporaryDirectory(dir=dest.parent) as staging:
+            tmp = Path(staging) / 'book'
+            try:
+                summary = convert(path, tmp, extract_media)
+                write_book_index(tmp, path.relative_to(src).as_posix(), summary)
+                files = sorted(p.relative_to(tmp).as_posix() for p in tmp.rglob('*') if p.is_file())
+            except Exception as error:  # one broken book must not block the others
+                reason = error if isinstance(error, ConversionError) else f'{type(error).__name__}: {error}'
+                failures.append(key)
+                log(f'失敗：{path}：{reason}')
+                continue
+            if dest.is_dir():
+                shutil.rmtree(dest)
+            tmp.rename(dest)
         manifest['books'][key] = {
-            'source': path.relative_to(src).as_posix(), 'sha256': digest,
-            'sheet_count': len(summary['sheets']), 'chars': sum(r['chars'] for r in summary['sheets']),
+            'source': path.relative_to(src).as_posix(), 'sha256': digest, 'files': files,
+            'sheet_count': len(summary['sheets']), 'chars': sum(r['md_chars'] for r in summary['sheets']),
             'flows': summary['flows'], 'media': summary['media'], 'media_extracted': extract_media,
         }
         log(f"変換：{path} → {dest}（{len(summary['sheets'])} シート、フロー {len(summary['flows'])}）")
@@ -282,12 +424,18 @@ def run(src, out, check=False, extract_media=False, log=print):
         if check:
             log(f'原本のない出力：{out / key}')
             continue
-        shutil.rmtree(out / key, ignore_errors=True)
+        if (out / key).is_dir():
+            shutil.rmtree(out / key)
         del manifest['books'][key]
         log(f'削除：{out / key}')
+    missing_index = not (out / 'index.md').is_file()
     if check:
-        return 1 if stale else 0
-    if len(stale) > len(failures) or not (out / 'index.md').is_file():
+        if missing_index:
+            log(f"目次がありません：{out / 'index.md'}")
+        return 1 if stale or missing_index else 0
+    if len(stale) > len(failures) or missing_index:
+        if not failures:
+            manifest['format'] = FORMAT_VERSION
         out.mkdir(parents=True, exist_ok=True)
         write_root_index(out, manifest)
         (out / MANIFEST).write_text(json.dumps(manifest, ensure_ascii=False, indent=1, sort_keys=True) + '\n',
@@ -309,7 +457,7 @@ def main(argv=None):
     args = parser.parse_args(argv)
     try:
         return run(args.src, args.out, check=args.check, extract_media=args.extract_media)
-    except ConversionError as error:
+    except (ConversionError, OSError, ValueError) as error:
         print(f'エラー：{error}', file=sys.stderr)
         return 2
 

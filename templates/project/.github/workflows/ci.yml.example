@@ -31,9 +31,14 @@ jobs:
       # .claude/rules/ を編集したのに Copilot 用の生成物を更新していない場合に失敗する。
       - name: Generated Copilot instructions are in sync
         run: python3 scripts/sync_rules.py --check
+      # 修正指示から作ったルール（config/guard/rules.json）。新しい違反、期限切れの例外、壊れたルールで失敗する。
+      # --format github で、違反が PR の該当行に注釈として表示される。
+      - name: Deterministic checks (guard)
+        run: python3 scripts/guard.py --format github
       # Excel 設計書を使用する場合は有効にする（Python 3.11+ と変換ツールのインストールが必要）。
       # - name: Converted Excel specs are up to date
       #   run: python3 scripts/xlsx2ai.py --check
+      # config/quality/pom-snippet.xml を pom.xml に追加していれば、ArchUnit（レイヤー）と PMD（JSP のエスケープ）もここで検査される。
       - name: Build and test
         run: ./mvnw -B verify
 

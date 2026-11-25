@@ -1,0 +1,12 @@
+# GitHub Copilot のコンテンツ除外。リポジトリの Settings → Copilot → Content exclusion の
+# 「Paths to exclude in this repository」にこのファイルの内容を貼る（Copilot Business / Enterprise）。
+# .claude/settings.json の Read の deny と同じ対象にする。片方を変えたらもう片方も変える（テストで照合している）。
+# パターンは fnmatch で大文字・小文字を区別しない。先頭が / のものはリポジトリのルートから、それ以外はどの階層にも一致する。
+# Copilot の除外はファイルシステムの安全境界ではない（間接的な読み取りまでは防げない）。最後の防御は CI と人のレビュー。
+- ".env"
+- ".env.*"
+- "*credentials*"
+- "*secret*"
+- "*.xlsx"
+- "*.xlsm"
+- "/screen-tests/report.html"

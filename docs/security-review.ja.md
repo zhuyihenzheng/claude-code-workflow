@@ -5,7 +5,7 @@
 
 ## 1. 結論
 
-- テンプレートは設定ファイル、Markdown、3 本のスクリプトで構成され、導入先のプロジェクト内で外部へ通信するコードは含まない。
+- テンプレートは設定、手順書、検証用スクリプトを導入する。モデル、ブラウザー、依存パッケージの取得先への通信は第 2・3 章に示す。
 - 既定の設定では、リモートの MCP サービス、サードパーティのプラグイン／mod、claude.ai コネクタ、Artifact の公開を使用しない。
 - 最大の論点はテンプレートではなく、**Claude Code と GitHub Copilot がソースコードとプロンプトを社外の AI サービスへ送信すること**である。利用契約、接続経路、顧客の同意の確認が前提となる。
 - テンプレートの権限設定は誤操作の防止策であり、セキュリティ境界ではない。境界は、管理者が配布する managed settings、OS のサンドボックス、最小権限の認証情報、リモートのブランチ保護で確保する。
@@ -34,7 +34,7 @@
 | `playwright`、Chromium | npm、Playwright の配布サーバー | 導入先で固定する | `scripts/htmx-check.mjs` の実行時 |
 | `midscene-poc`（画面試験フレームワーク） | `github.com`（公開リポジトリ。npm の Git 依存として取得） | コミット SHA（`bac60a7db489…`）で固定 | `screen-tests/` で `npm install` した場合のみ |
 | `playwright@1.65.1` と Chromium | npm、Playwright の配布サーバー | 直接依存のバージョンを固定 | 同上 |
-| `exstruct==0.9.0`、`excel2md==2.3.0` | PyPI | 直接依存のバージョンのみ固定 | `scripts/xlsx2ai.py` の実行時（Excel 設計書を使用する場合のみ） |
+| `exstruct==0.9.1`、`excel2md==2.3.0` | PyPI | 直接依存のバージョンのみ固定 | `scripts/xlsx2ai.py` の実行時（Excel 設計書を使用する場合のみ） |
 | 汎用 skill 3 件（MIT、mattpocock/skills 由来） | 本リポジトリに同梱 | 同梱済み。テキストの指示のみ | 利用者が `~/.claude/skills` に導入した場合 |
 
 社内のミラー（npm／PyPI）がある場合は、そちらを使用する。
@@ -47,7 +47,8 @@
 | `.claude/settings.json` | 設定のみ。hooks は登録していない | なし |
 | `.claude/hooks/verify-stop.py` | **未登録の参考サンプル**。登録しない限り実行されない | なし（Maven を起動する） |
 | `scripts/sync_rules.py` | 手動または CI で実行。標準ライブラリのみ | なし |
-| `scripts/xlsx2ai.py` | 手動で実行。ローカルで変換ツールを起動する | なし |
+| `scripts/xlsx2ai.py` | ローカルで設計書を Markdown と JSON に変換する。生成物も原本と同じ機密区分で扱う | なし |
+| `scripts/guard.py` | 手動、CI または `install.py doctor` から実行し、ローカルのコードを検査する | なし |
 | `scripts/htmx-check.mjs` | 手動で実行。引数で渡した URL を開く | 指定した URL のみ |
 | `.mcp.json` | Claude Code の起動時に Playwright MCP を起動する（初回は承認の確認が表示される） | 3 章を参照 |
 | `scripts/xlsx_patch.py` | 手動で実行。変更指示（JSON）どおりにブックのセルを書き換える。標準ライブラリのみ | なし |

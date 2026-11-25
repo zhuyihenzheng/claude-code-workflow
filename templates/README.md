@@ -72,7 +72,23 @@ node scripts/htmx-check.mjs --storage-state target/htmx-check/state.json --clear
 
 ## Excel 设计书转换脚本
 
-[`project/scripts/xlsx2ai.py`](project/scripts/xlsx2ai.py) 把 `specs/` 下的 .xlsx/.xlsm 转成 `specs-ai/`：按 sheet 拆分的 ExStruct light JSON、图形流程图的 Mermaid（excel2md）以及目次。只重转 SHA-256 变化的文件，删除原本已不存在的输出；`--check` 供 CI 检查过期。需 Python 3.11+ 与 `pip install "exstruct==0.9.0" "excel2md==2.3.0"`。模板 settings 同时 deny `Read(/**/*.xlsx)` / `Read(/**/*.xlsm)`，避免 AI 直接读原本。实测数据、人工处理项与 MCP 定位见 [11 · Excel 设计书](../docs/11-Excel设计书.md)。
+[`project/scripts/xlsx2ai.py`](project/scripts/xlsx2ai.py) 把 `specs/` 下的 .xlsx/.xlsm 转成 `specs-ai/`：按 sheet 拆分的 Markdown（表还原成 Markdown 表、地の文按缩进成为列表、图形流程图以 Mermaid 嵌入）、同名的 ExStruct light JSON（需要单元格位置时用）以及目次。原本变化或生成文件缺失时重转对应的工作簿，原本删除时清理对应输出。`--check` 可在 CI 中检查这些情况。需 Python 3.11+ 与 `pip install "exstruct==0.9.1" "excel2md==2.3.0"`。模板 settings 同时 deny `Read(/**/*.xlsx)` / `Read(/**/*.xlsm)`，避免 AI 直接读原本。实测数据、人工处理项与 MCP 定位见 [11 · Excel 设计书](../docs/11-Excel设计书.md)。
+
+## 确定性检查（guard）与纠正流程
+
+[`project/scripts/guard.py`](project/scripts/guard.py) 按 [`project/config/guard/rules.json`](project/config/guard/rules.json) 检查代码，只用标准库（Python 3.9+）。退出码 `0` 通过、`1` 有新违规、`2` 规则或配置有误（未完成检查，不能当成通过）。每条规则带修法（`message`）、来源（`origin`）和真实错误样例（`examples`），每次运行先自检样例。
+
+- **导入已有项目**：先运行 `python3 scripts/guard.py`。既有违规多时，由人执行一次 `python3 scripts/guard.py --init-baseline`，接受现状；此后件数只减不增，修好后用 `--update-baseline` 收紧。基线写入 `config/guard/baseline.json`，请提交。
+- **例外**：写在违规行或上一行，`guard:allow <规则ID> until=YYYY-MM-DD by=<批准人> -- <理由>`，期限 1 年内。agent 不写例外。
+- **权限**：检查、`--list`、`--update-baseline` 预先允许；`--init-baseline` 与编辑基线文件为 ask。
+- **CI**：`ci.yml.example` 在构建前运行 guard；`install.py doctor` 也会运行它，并核对 AGENTS.md 里 `〔guard: id〕` 标注的规则都存在。
+- **增长规则**：人纠正 agent 后，skill [`correct`](project/.claude/skills/correct/SKILL.md) 按“设计 → 类型 → guard 规则 → 测试 → 文字”的顺序落地，并在 AGENTS.md 标注。
+- **功能地图**：[`project/docs/feature-map/`](project/docs/feature-map/README.md) 与 skill [`feature-map`](project/.claude/skills/feature-map/SKILL.md)。一个功能一个文件，写可执行的命令与合格结果；code-reviewer 与 [PR 模板](project/.github/pull_request_template.md)从这些证据开始。
+
+- **ArchUnit 与 PMD**（`./mvnw verify` 里运行）：guard 只做文本匹配。看依赖关系的规则放 [`ArchitectureTest.java`](project/src/test/java/ArchitectureTest.java)（`--with-archunit` 安装；默认包、按 Spring 注解判层），JSP 的转义检查放 [`config/pmd/jsp-ruleset.xml`](project/config/pmd/jsp-ruleset.xml)。安装脚本不改 `pom.xml`，按 [`config/quality/pom-snippet.xml`](project/config/quality/pom-snippet.xml) 手动加入。既有违规多时：ArchUnit 用 `FreezingArchRule`，PMD 把 `maxAllowedViolations` 设为当前件数，之后只减不增。`doctor` 会核对 AGENTS.md 里 `〔ArchUnit: …〕`、`〔PMD: …〕` 标注的规则是否真的在运行。
+- **PR 上的注释**：CI 示例用 `guard.py --format github`，违规显示在 PR diff 的对应行。
+
+背景、起始规则一览、结合了哪些开源项目、刻意不做的事见 [15 · 纠正变成检查](../docs/15-纠正变成检查.md)。
 
 ## 画面试验与 Excel 修改
 
@@ -83,6 +99,8 @@ node scripts/htmx-check.mjs --storage-state target/htmx-check/state.json --clear
 背景、分工与验证范围见 [14 · 改修流程与画面试验](../docs/14-改修流程与画面试验.md)。
 
 ## 规则维护与 Copilot 兼容范围
+
+Copilot 能直接共用的文件、需要在 GitHub 设置里做的事（内容排除、setup steps、CODEOWNERS）、以及对 Copilot 不起作用的 Claude 专用配置，见 [06 · 团队协作](../docs/06-团队协作与ci.md#copilot-能共用什么2026-11-23-核对) 与导入方的 [`config/copilot/README.md`](project/config/copilot/README.md)。
 
 AGENTS.md 是项目规则的唯一事实来源；`.github/copilot-instructions.md` 只保留必守摘要，修改共通规则时同时核对摘要。路径细则只改 `.claude/rules/*.md`，由脚本转换 `paths:` 列表为 Copilot 的 `applyTo`，正文原样生成；不要直接编辑 `.github/instructions/` 镜像。
 
@@ -169,8 +187,9 @@ printf '%s\n' '{"stop_hook_active":false}' | python3 .claude/hooks/verify-stop.p
 | `project/.github/workflows/claude.yml` | `@claude` 评论/评审/新 issue 触发，可修改代码；默认 20 轮、5 美元、20 分钟。**提交后即生效**，未配置 App 与密钥时每次 `@claude` 都会触发一次失败的 job |
 | `project/.github/workflows/ci.yml.example` | 导入方自己的构建门禁：`sync_rules.py --check` 与 `./mvnw -B verify`。不调用任何 AI 服务，改名为 `ci.yml` 并设为 required check 后才构成合并门禁 |
 | `project/.github/workflows/claude-review.yml.example` | 明确需要自动评审时才改名为 `.yml`；带独立 prompt，只评审同仓库非草稿 PR，结果在 Actions 日志；15 轮、3 美元、20 分钟 |
+| `project/.github/workflows/copilot-setup-steps.yml.example` | 只在使用 GitHub Copilot 云端 agent 时需要，默认不安装，另用 `--with-copilot-cloud-agent` 安装；改名为 `copilot-setup-steps.yml` 并合并到默认分支后，在 agent 开始前装好 Python 转换依赖、Playwright 与 Chromium、Maven 依赖。不调用模型 |
 
-安装脚本默认把三者列为 `optional` 而不复制；确认要用 GitHub 自动化后用 `--with-workflows` 安装。两个 Claude workflow 保留 action 默认的触发者写权限检查与 bot 限制。预算数字是模板起点，按团队调整。美元限制不能替代账号/组织支出控制。
+安装脚本默认把这些都列为 `optional` 而不复制。前三个确认要用 GitHub 自动化后用 `--with-workflows` 安装；Copilot 云端 agent 的环境与之分开，不随 `--with-workflows` 安装。两个 Claude workflow 保留 action 默认的触发者写权限检查与 bot 限制。预算数字是模板起点，按团队调整。美元限制不能替代账号/组织支出控制。
 
 交互模板的 `id-token: write` 用于默认 GitHub App 认证；`additional_permissions: actions: read` 与 job 的同名权限一并配置，App 安装也须允许。自动评审模板显式传入只读 `${{ github.token }}` 作为 `github_token` 和 `GH_TOKEN`，不使用 App/OIDC；先通过 `gh pr view/diff` 检查读取权限，失败就终止，不调用模型。API key 使用 `anthropic_api_key`；订阅 OAuth 改成 `claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}`。不能只换 Secret 名而保留错误的 input。
 

@@ -221,6 +221,30 @@ class XlsxPatchTests(unittest.TestCase):
             for name, data in (extra or {}).items():
                 dst.writestr(name, data)
 
+    def test_expected_edit_cannot_hide_a_formula_or_style_change(self):
+        patch = self.patch({'sheet': '試験結果', 'cells': {'C3': {'from': 'NG', 'to': '変更'}}})
+        edited = self.dir / 'edited.xlsx'
+        applied = self.dir / 'applied.xlsx'
+        self.assertEqual(run('apply', self.book, patch, '--out', applied)[0], 0)
+        def change_formula_and_style(xml):
+            xml = xml.replace('COUNTA(C2:C5)', 'COUNT(C2:C5)')
+            return xlsx_patch.re.sub(r'(<c r="C3") s="\d+"', r'\1', xml)
+        self.resave(applied, edited, edit=change_formula_and_style)
+        code, log = run('diff', self.book, edited, '--expect', patch)
+        self.assertEqual(code, 1, log)
+        for ref in ('C3', 'C8'):
+            self.assertIn('書式または数式が変わっています：試験結果!' + ref, log)
+
+    def test_large_merged_range_still_protects_non_anchor_cells(self):
+        merged = self.dir / 'large.xlsx'
+        self.resave(self.book, merged, edit=lambda xml: xml.replace('A10:C10', 'A10:D100000'))
+        before = merged.read_bytes()
+        patch = self.patch({'sheet': '試験結果', 'cells': {'D100000': {'from': '', 'to': 'x'}}})
+        code, log = run('apply', merged, patch)
+        self.assertEqual(code, 2, log)
+        self.assertIn('結合セル', log)
+        self.assertEqual(merged.read_bytes(), before)
+
     def test_diff_accepts_a_resave_that_changes_only_the_instructed_cell(self):
         patch = self.patch({'sheet': '試験結果', 'table': {'key': 'ケースID', 'rows': {'C-01': {'判定': {'from': 'NG', 'to': '既知NG'}}}}})
         applied = self.dir / 'applied.xlsx'
