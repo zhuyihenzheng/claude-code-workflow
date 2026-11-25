@@ -9,7 +9,7 @@
 - レイヤー間の依存は Controller → Service → Mapper/Repository の一方向とする。Controller から永続化層を直接呼び出したり、永続化層のオブジェクトをそのまま公開したりしない。〔guard: controller-no-persistence〕〔ArchUnit: controllers_do_not_use_persistence, services_do_not_depend_on_controllers〕
 - DI はコンストラクタインジェクションに統一し、フィールドインジェクションは使用しない。永続化層はプロジェクトで採用している方式を踏襲し、テンプレートに合わせるために JPA を導入しない。〔guard: java-no-field-injection〕〔ArchUnit: no_field_injection〕
 - REST の例外はプロジェクトの規約に従って JSON で返す（例：`@RestControllerAdvice`）。画面の例外はビューで処理し（例：`@ControllerAdvice` + ModelAndView）、画面に JSON のエラーレスポンスを返さない。例外を握りつぶさない。〔guard: java-no-empty-catch, java-no-print-stack-trace〕
-- テストには JUnit 5 + Mockito を使用する。新規コードには必ずテストを追加し、失敗するテストを先に作成してから実装する。結合テストには Testcontainers を使用する。テストを無効化して通さない。待ち合わせに固定時間の sleep を使わない。〔guard: test-no-disabled, java-no-thread-sleep, e2e-no-fixed-wait〕
+- テストには JUnit 5 + Mockito を使用する。新規コードには必ずテストを追加し、失敗するテストを先に作成してから実装する。結合テストには Testcontainers を使用する。テストには `@DisplayName` で確認する観点を日本語で書く（単体テスト成績書の「観点」になる）。テストを無効化して通さない。待ち合わせに固定時間の sleep を使わない（テストも本番コードも）。〔guard: test-no-disabled, java-no-thread-sleep, e2e-no-fixed-wait〕
 - ビルドにはプロジェクトの Maven Wrapper を使用し、システムにインストールされた mvn は使用しない。
 
 ### 画面の実装規約と検証
@@ -25,10 +25,12 @@
 ### 修正指示と決定的チェック
 
 - 規約末尾の〔guard: …〕は、その規約のうち `python scripts/guard.py`（ルールは `config/guard/rules.json`）が検査する部分のルール ID である。〔ArchUnit: …〕（`src/test/java/ArchitectureTest.java`）と〔PMD: …〕（`config/pmd/jsp-ruleset.xml`）は `./mvnw verify` が検査する。タグのない規約と、検査できない部分はレビューで確認する。
-- 変更後とコミット前に `python scripts/guard.py` を実行し、違反は表示された直し方で直す。ルールを弱めない。例外（`guard:allow`）とベースライン（`config/guard/baseline.json`）は人だけが追加・更新する。件数を縮小する `--update-baseline` は実行してよい。
+- 変更後とコミット前に `python scripts/guard.py` を実行し、違反は表示された直し方で直す。ルールを弱めない。例外（`config/guard/allow.json`）とベースライン（`config/guard/baseline.json`）は人だけが追加・更新する。件数を縮小する `--update-baseline` は実行してよい。
 - 人から修正を指示されたら、直したうえで同じ誤りを繰り返さない仕組みを次の順で検討する：設計（正しい方法を 1 つにし、古い実装を削除する）→ 型・コンパイル → guard のルール → テスト → 文章のルール。文章だけで済ませるのは、判断が必要で機械化できないものに限る。
 - 回避策を正当化するコメントやコメントアウトしたコードを残さない。直せない外部の制約は、テストかルールで表し、課題番号を記載する。〔guard: comment-workaround, java-no-commented-out-code〕
 - 完了の報告では、主張ではなく証跡（実行したコマンドと結果、スクリーンショットの保存先、`docs/feature-map/` の機能 ID）を示す。画面や機能は機能マップの名称と ID で呼ぶ。
+- 作業の最初に `docs/knowledge/`（用語集 `glossary.md`、コードマップ `codemap.md`）を読み、依頼の言葉と修正箇所を引く。作業の最後に、今回確かめた事実を書き戻す（`knowledge` skill）。記載が古くなっていないことは `python scripts/knowledge_check.py` が確認する。
+- 設計書の表とコードの値の対応（メッセージ一覧など）は `config/spec-sync.json` に登録し、`python scripts/spec_sync.py` で一致を確認する。不一致は、設計書が正しければコードを、コードが正しければ設計書を直す。
 
 ### 制約・セキュリティ・データの取り扱い
 

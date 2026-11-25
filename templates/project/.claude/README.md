@@ -33,17 +33,23 @@ GitHub Copilot と併用する場合に Copilot へ効くもの・効かない�
 
 - `python3 scripts/guard.py` は `config/guard/rules.json` のルールでコードを検査する。終了コード 0 = 違反なし、1 = 違反あり、2 = ルールまたは設定の誤り（検査未完了であり、合格ではない）。CI でも同じコマンドを実行する。
 - 導入時に既存の違反が多い場合は、人が一度だけ `python3 scripts/guard.py --init-baseline` を実行し、現状を `config/guard/baseline.json` に記録してコミットする。以後、件数は縮小だけができる（`--update-baseline`）。
-- 例外は違反行またはその直前の行に `guard:allow <ルールID> until=YYYY-MM-DD by=<承認者> -- <理由>` と書く。期限は 1 年以内で、期限が切れると失敗する。承認者は人であり、エージェントには書かせない。
-- 検査、`--list`、`--update-baseline` は許可している。`--init-baseline` の実行と `config/guard/baseline.json` の編集は ask としている。
+- 例外は `config/guard/allow.json` に 1 件ずつ登録する（`rule`、`path`、`match`＝違反行に含まれる文字列、`until`、`by`＝承認者、`reason`）。期限は 1 年以内で、期限が切れると失敗する。承認者は人であり、エージェントには書かせない。ソースコードに書いた例外コメント（`guard:allow`）は違反になる（承認を経ずに書けてしまうため）。
+- 検査、`--list`、`--update-baseline` は許可している。`--init-baseline` の実行と `config/guard/`（ルール・ベースライン・例外）の編集は ask としている。ルールを追加するときも人が内容を確認して許可する。
 - ルールの追加は `correct` skill の手順で行う。`examples.bad` には実際にあった誤りを入れ、`examples.good` には誤検知しやすい正しい書き方を入れる。どちらかが期待どおりでなければ guard は終了コード 2 で止まる。
 - guard は文字列の一致しか見ない。クラス間の依存は ArchUnit（`src/test/java/ArchitectureTest.java`）、JSP の構文に基づく検査は PMD（`config/pmd/jsp-ruleset.xml`）で行い、どちらも `./mvnw verify` で実行される。導入時に既存の違反が多い場合は、ArchUnit は `FreezingArchRule`、PMD は `maxAllowedViolations` で現状を記録し、以後は減らすだけにする。
 - maven-pmd-plugin の設定は `<plugin>` 直下に置く。`<execution>` の中に置くと、`check` が内部で実行する解析に設定が渡らず、JSP を検査しないまま成功する。
+
+## 設計書・知識・成績書のスクリプト
+
+- `scripts/knowledge_check.py`（`docs/knowledge/` の記載が古くないか）、`scripts/spec_sync.py`（設計書の表とコードの値が一致するか）、`scripts/junit_report.py`（JUnit の結果から単体テスト成績書を作る）は読み取りと生成だけを行うため許可している。
+- `scripts/ai_metrics.py`（AI の PR の手戻りの推移）は GitHub の PR を読むため許可していない。人が月に一度などの間隔で実行し、結果をチームで確認する。
+- `config/spec-sync.json` は通常のファイルとして編集できる。対応を削って不一致を隠していないかは、レビューで確認する。
 
 ## 画面試験と Excel の修正
 
 - `node run.mjs --engine playwright`（`--build-only`、`--only <スイート>` を含む）は許可している。`--engine ai` / `--engine midscene` / `--heal` / `--ai-assert` は画面のスクリーンショットをモデルに送信するため ask、`--update-baseline` / `--update-visual` は人だけが行うため deny としている。
 - `screen-tests/baseline.json` の編集は ask、スクリーンショットを埋め込んだ `screen-tests/report.html` の Read は deny としている。AI は `結果一覧.md` を読む。
-- Excel の修正は `scripts/xlsx_patch.py` の変更指示で行う。実行のたびに確認が入る（allow に追加していない）。
+- Excel の修正は `scripts/xlsx_patch.py` の変更指示で行う。実行のたびに確認が入る（allow に追加していない）。表への行の追加（`append`）は表の直下の空き行に書くだけで、行は挿入しない。
 
 ## Hooks
 

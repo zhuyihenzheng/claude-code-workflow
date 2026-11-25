@@ -5,7 +5,6 @@ import static com.tngtech.archunit.core.domain.properties.CanBeAnnotated.Predica
 import static com.tngtech.archunit.core.domain.properties.CanBeAnnotated.Predicates.metaAnnotatedWith;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noFields;
-import static com.tngtech.archunit.library.GeneralCodingRules.BE_ANNOTATED_WITH_AN_INJECTION_ANNOTATION;
 
 import com.tngtech.archunit.base.DescribedPredicate;
 import com.tngtech.archunit.core.domain.JavaClass;
@@ -20,6 +19,9 @@ import com.tngtech.archunit.lang.ArchRule;
  * <p>scripts/guard.py は import 文の文字列しか見ないため、同じパッケージ内の参照や完全修飾名での参照はここで止める。
  * パッケージ名に依存しないよう、デフォルトパッケージに置き、Spring のアノテーションとクラス名で層を判定する。
  * 依存関係は config/quality/pom-snippet.xml を参照。
+ *
+ * <p>複数モジュールのプロジェクトでは、Controller や Service があるモジュールごとの src/test/java に置く
+ * （packaging が pom の親モジュールではテストがコンパイルされない。他のモジュールのクラスは jar として扱われ、検査されない）。
  *
  * <p>既存の違反が多いプロジェクトに導入する場合は、該当ルールを
  * {@code com.tngtech.archunit.library.freeze.FreezingArchRule.freeze(...)} で包み、人が一度だけ
@@ -51,9 +53,16 @@ class ArchitectureTest {
             .because("依存は Controller → Service → 永続化層 の一方向にする。Controller の処理が必要なら Service に移す")
             .allowEmptyShould(true);
 
+    // 設定値の @Value は対象外にする（scripts/guard.py の java-no-field-injection と同じ範囲）。
+    // ArchUnit 標準の BE_ANNOTATED_WITH_AN_INJECTION_ANNOTATION は @Value も含むため使わない。
     @ArchTest
     static final ArchRule no_field_injection = noFields()
-            .should(BE_ANNOTATED_WITH_AN_INJECTION_ANNOTATION)
-            .because("依存は private final フィールドにし、コンストラクタの引数で受け取る")
+            .should().beAnnotatedWith("org.springframework.beans.factory.annotation.Autowired")
+            .orShould().beAnnotatedWith("jakarta.inject.Inject")
+            .orShould().beAnnotatedWith("javax.inject.Inject")
+            .orShould().beAnnotatedWith("jakarta.annotation.Resource")
+            .orShould().beAnnotatedWith("javax.annotation.Resource")
+            .orShould().beAnnotatedWith("com.google.inject.Inject")
+            .because("依存は private final フィールドにし、コンストラクタの引数で受け取る（設定値の @Value は対象外）")
             .allowEmptyShould(true);
 }

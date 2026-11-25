@@ -23,6 +23,7 @@
 """
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -43,17 +44,30 @@ TOOL_CODE = {
     'excel2md': 'import sys; from excel2md.cli import main; sys.exit(main())',
 }
 # Bump when the output layout changes so every book is regenerated.
-FORMAT_VERSION = 2
+FORMAT_VERSION = 3
 
 
 class ConversionError(RuntimeError):
     pass
 
 
-def tool(name, *args):
-    """Run exstruct / excel2md from PATH or from this interpreter's packages."""
+def tool_command(name, *args):
+    """Command line for exstruct / excel2md. The package installed for this interpreter comes
+    first: it is the pinned version, while PATH may hold another install (pipx, another venv)."""
+    try:
+        installed = importlib.util.find_spec(name) is not None
+    except (ImportError, ValueError):
+        installed = False
+    if installed:
+        return [sys.executable, '-c', TOOL_CODE[name], *args]
     exe = shutil.which(name)
-    cmd = [exe, *args] if exe else [sys.executable, '-c', TOOL_CODE[name], *args]
+    if exe:
+        return [exe, *args]
+    raise ConversionError(f'{name} が未インストールです（{sys.executable} -m pip install "exstruct==0.9.1" "excel2md==2.3.0"）')
+
+
+def tool(name, *args):
+    cmd = tool_command(name, *args)
     env = dict(os.environ, PYTHONIOENCODING='utf-8')
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace', env=env)
@@ -136,9 +150,9 @@ def inspect_drawings(path):
                     target = sheet_rels.get(drawing.get(f'{{{NS_REL}}}id'))
                     if target and target in zf.namelist():
                         xml = zf.read(target).decode('utf-8', 'replace')
-                        counts['shapes'] += len(re.findall(r'<(?:\w+:)?sp[ >]', xml))
-                        counts['connectors'] += len(re.findall(r'<(?:\w+:)?cxnSp[ >]', xml))
-                        counts['pictures'] += len(re.findall(r'<(?:\w+:)?pic[ >]', xml))
+                        counts['shapes'] += len(re.findall(r'<(?:\w+:)?sp[\s/>]', xml))
+                        counts['connectors'] += len(re.findall(r'<(?:\w+:)?cxnSp[\s/>]', xml))
+                        counts['pictures'] += len(re.findall(r'<(?:\w+:)?pic[\s/>]', xml))
             stats[name] = counts
     return stats
 
@@ -155,25 +169,35 @@ def extract_flows(path, sheets):
         out = Path(tmp) / 'flows.md'
         tool('excel2md', str(path), '-o', str(out), '--mermaid-enabled', '--mermaid-detect-mode', 'shapes',
              '--no-csv-markdown-enabled')
-        text = out.read_text(encoding='utf-8')
+        return flows_from_markdown(out.read_text(encoding='utf-8'), sheets)
+
+
+def flows_from_markdown(text, sheets):
+    """excel2md の出力（シートごとの「## シート名」）から Mermaid を取り出す。
+    見出しの前後の空白は落ちるため、空白を除いた名前で元のシート名に対応付ける。"""
+    names = {name.strip(): name for name in sheets}
     flows = {}
     for section in re.split(r'^## ', text, flags=re.M)[1:]:
         title, _, body = section.partition('\n')
-        title = title.strip()
-        if title in sheets:
+        name = names.get(title.strip())
+        if name is not None:
             blocks = re.findall(r'```mermaid\n(.*?)```', body, re.S)
             if blocks:
-                flows[title] = '\n'.join(block.strip() + '\n' for block in blocks)
+                flows[name] = '\n'.join(block.strip() + '\n' for block in blocks)
     return flows
 
 
 # シートの Markdown：ExStruct の行（空セルを除いた値と列番号）から、表と地の文を復元する。
-# 表：見出し行と、同じ左端の列から始まり見出し行の列に収まる行の並び（2 段の見出し、結合で生じた 2 行までの空行を許す）。
+# 表：見出し行と、同じ左端の列から始まり見出し行の列に収まる行の並び。
+#     2 段の見出し（下の段が右から始まる、または上の段の各見出しの下に複数の列がある）を「上/下」にまとめる。
+#     見出しより右に 1 つだけはみ出した値（備考など）は、見出しが空の列にする。結合で生じた 2 行までの空行は許す。
 #     値が 1 つだけの行（番号・記号を除く）は表の終わりとみなす。
 # 地の文：字下げ（左端の列）の深さに応じた箇条書き。番号や記号で始まる 1 セルの行は見出しにする。
+# 先頭から 1 回だけ走査する（行数に比例する時間で終わる）。
 HEADING = re.compile(r'^(?:\d+(?:\.\d+)*[.．]?\s|[■□◆◇●【≪＜〈《\[])')
 BULLETS = {'・', '-', '－', '*', '＊', '●', '○'}
 MARKER = re.compile(r'^(?:[・※\-－*＊●○]|[①-⑳]|\(?\d+\)|[0-9]+[.．、]?)$')
+NUMBER = re.compile(r'[-+]?[\d,]+(?:\.\d+)?%?')
 MAX_GAP = 2
 HTML_TAG = re.compile(r'<(?=[A-Za-z/!])')
 
@@ -190,27 +214,52 @@ def row_cells(row):
     return [(col, value) for col, value in items if value]
 
 
-def table_header(rows):
-    """(列ごとの見出し, 見出しの行数)。rows が表でなければ None。"""
-    first = rows[0][1]
-    if len(first) < 2 or MARKER.match(first[0][1]):
+def second_header(top, start, cells):
+    """cells が見出しの 2 段目なら、まとめた見出しを返す。"""
+    if len(cells) < 2:
         return None
-    start = first[0][0]
-    labels, body, count = dict(first), rows[1:], 1
-    if body and body[0][1][0][0] > start and len(body[0][1]) >= 2:
-        sub, parent, merged = dict(body[0][1]), '', {}
-        for col in sorted(set(labels) | set(sub)):
-            parent = labels.get(col, parent)
-            merged[col] = f'{parent}/{sub[col]}' if col in sub and parent else sub.get(col) or labels[col]
-        labels, body, count = merged, body[1:], 2
-    if not body:
+    first = cells[0][0]
+    cols = {col for col, _ in cells}
+    lo, hi = min(top), max(top)
+    # 同じ列から始まる 2 段目：上の段のすべての列を含み、上の段の見出しの間にも列があり、数値を含まない。
+    grouped = (first == start and len(top) >= 2 and set(top) < cols
+               and any(lo < col < hi and col not in top for col in cols)
+               and not any(NUMBER.fullmatch(value) for _, value in cells))
+    if first <= start and not grouped:
         return None
-    for _, cells in body:
-        if cells[0][0] != start or not {col for col, _ in cells} <= set(labels):
-            return None
-        if len(cells) == 1 and not MARKER.match(cells[0][1]):
-            return None
-    return labels, count
+    sub, parent, merged = dict(cells), '', {}
+    for col in sorted(set(top) | cols):
+        parent = top.get(col, parent)
+        merged[col] = f'{parent}/{sub[col]}' if col in sub and parent else sub.get(col) or top[col]
+    return merged
+
+
+def body_end(rows, j, start, labels):
+    """rows[j] から続く表の本体の終わり。"""
+    last = max(labels)
+    while j < len(rows) and rows[j][0] - rows[j - 1][0] <= MAX_GAP + 1:
+        cells = rows[j][1]
+        if cells[0][0] != start or (len(cells) == 1 and not MARKER.match(cells[0][1])):
+            break
+        inside = sum(col in labels for col, _ in cells)
+        # 見出しより右の値（備考など）は 1 つまで。表の列に 2 つ以上の値がある行に限る（次の表の見出しを取り込まない）。
+        if inside < len(cells) and not (inside >= 2 and len(cells) - inside == 1 and cells[-1][0] > last):
+            break
+        j += 1
+    return j
+
+
+def table_at(rows, i):
+    """rows[i] から始まる表：(終わりの添字, 列ごとの見出し, 見出しの行数)。表でなければ None。"""
+    if i >= len(rows) or len((first := rows[i][1])) < 2 or MARKER.match(first[0][1]):
+        return None
+    start, top, j = first[0][0], dict(first), i + 1
+    if j < len(rows) and rows[j][0] - rows[i][0] <= MAX_GAP + 1 and (labels := second_header(top, start, rows[j][1])):
+        if (k := body_end(rows, j + 1, start, labels)) > j + 1:
+            return k, labels, 2
+    if (k := body_end(rows, j, start, top)) > j:
+        return k, top, 1
+    return None
 
 
 def is_title(text, marked=False):
@@ -223,26 +272,13 @@ def md_text(text):
 
 
 def table_lines(rows, labels, count):
-    cols = sorted(labels)
+    body = [dict(cells) for _, cells in rows[count:]]
+    cols = sorted(set(labels).union(*body))
 
     def line(values):
         return '| ' + ' | '.join(md_text(values.get(col, '')).replace('|', '\\|').replace('\n', '<br>') for col in cols) + ' |'
 
-    return [line(labels), '|' + '---|' * len(cols)] + [line(dict(cells)) for _, cells in rows[count:]]
-
-
-def run_end(rows, i):
-    j = i + 1
-    while j < len(rows) and rows[j][0] - rows[j - 1][0] <= MAX_GAP + 1:
-        j += 1
-    return j
-
-
-def table_at(rows, i):
-    for k in range(run_end(rows, i), i + 1, -1):
-        if (header := table_header(rows[i:k])):
-            return k, header
-    return None
+    return [line(labels), '|' + '---|' * len(cols)] + [line(values) for values in body]
 
 
 def sheet_markdown(name, sheet_rows, flows=''):
@@ -252,19 +288,20 @@ def sheet_markdown(name, sheet_rows, flows=''):
     out, stack, i = [f'# {md_text(name)}', ''], [], 0
     while i < len(rows):
         if (found := table_at(rows, i)):
-            k, (labels, count) = found
+            k, labels, count = found
             out += ([''] if out[-1] else []) + table_lines(rows[i:k], labels, count) + ['']
             stack, i = [], k
             continue
         cells = rows[i][1]
         if len(cells) > 1 and cells[0][1] in BULLETS:
             cells = cells[1:]
-        joined = md_text(' '.join(value.replace('\n', ' ') for _, value in cells))
-        if len(rows[i][1]) == 1 and is_title(joined, True):
+        text = ' '.join(value.replace('\n', ' ') for _, value in cells)
+        joined = md_text(text)
+        if len(rows[i][1]) == 1 and is_title(text, True):
             level = min(2 + heading_cols.index(cells[0][0]), 6)
             out += ([''] if out[-1] else []) + ['#' * level + ' ' + joined, '']
             stack = []
-        elif len(rows[i][1]) == 1 and is_title(joined) and table_at(rows, i + 1):
+        elif len(rows[i][1]) == 1 and is_title(text) and table_at(rows, i + 1):
             out += ([''] if out[-1] else []) + [f'**{joined}**']
             stack = []
         else:
@@ -390,9 +427,26 @@ def run(src, out, check=False, extract_media=False, log=print):
             failures.append(key)
             log(f'失敗：{path}：{reason}')
             continue
-        shutil.rmtree(dest, ignore_errors=True)
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        tmp.rename(dest)
+        # 前回の出力は、新しい出力に置き換わるまで消さない（Windows で開いているファイルがあると rename が失敗する）。
+        backup = out / f'.{PurePosixPath(key).name}.old'
+        try:
+            shutil.rmtree(backup, ignore_errors=True)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            if dest.exists():
+                dest.rename(backup)
+            try:
+                tmp.rename(dest)
+            except OSError:
+                if backup.exists():
+                    backup.rename(dest)
+                raise
+        except OSError as error:
+            shutil.rmtree(tmp, ignore_errors=True)
+            failures.append(key)
+            kept = f'前回の出力は {backup} にあります' if backup.exists() and not dest.exists() else '前回の出力はそのままです'
+            log(f'失敗：{path}：出力を置き換えられません（{error}）。{kept}')
+            continue
+        shutil.rmtree(backup, ignore_errors=True)
         manifest['books'][key] = {
             'source': path.relative_to(src).as_posix(), 'sha256': digest,
             'sheet_count': len(summary['sheets']), 'chars': sum(r['md_chars'] for r in summary['sheets']),

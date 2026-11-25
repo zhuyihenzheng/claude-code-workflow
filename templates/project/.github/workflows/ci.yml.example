@@ -35,12 +35,28 @@ jobs:
       # --format github で、違反が PR の該当行に注釈として表示される。
       - name: Deterministic checks (guard)
         run: python3 scripts/guard.py --format github
+      # docs/knowledge/ の記載（パス、機能 ID、用語）が古くなっていないか。
+      - name: Project knowledge is current
+        run: python3 scripts/knowledge_check.py
+      # config/spec-sync.json に登録した設計書の表とコードの値が一致しているか（登録がなければ何もしない）。
+      - name: Design documents match the code
+        run: python3 scripts/spec_sync.py
       # Excel 設計書を使用する場合は有効にする（Python 3.11+ と変換ツールのインストールが必要）。
       # - name: Converted Excel specs are up to date
       #   run: python3 scripts/xlsx2ai.py --check
       # config/quality/pom-snippet.xml を pom.xml に追加していれば、ArchUnit（レイヤー）と PMD（JSP のエスケープ）もここで検査される。
       - name: Build and test
         run: ./mvnw -B verify
+      # テストが失敗しても成績書は作る（失敗の内容が載る）。
+      - name: Unit test report
+        if: always()
+        run: python3 scripts/junit_report.py || test $? -eq 1
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-report
+          path: target/test-report/
+          if-no-files-found: ignore
 
   # 画面試験（screen-tests/ を導入している場合に有効にする）。アプリケーションの起動方法とテストデータの
   # 初期化はプロジェクトに合わせる。資格情報は合成データのテストアカウントを Secrets から渡す。
