@@ -150,49 +150,61 @@ class GuardTests(unittest.TestCase):
         self.assertIn('--init-baseline', out)
         self.assertFalse((self.root / guard.BASELINE).exists())
 
+    def allow(self, *entries):
+        self.write(guard.ALLOWLIST, json.dumps({'allow': list(entries)}, ensure_ascii=False))
+
+    def field_injection_allow(self, **fields):
+        entry = {'rule': 'java-no-field-injection', 'path': CONTROLLER, 'match': '@Autowired',
+                 'until': '2027-03-31', 'by': 'yamada', 'reason': '外部ライブラリが setter 注入だけを提供する'}
+        entry.update(fields)
+        return {k: v for k, v in entry.items() if v is not None}
+
     def test_allow_needs_reason_expiry_and_approver(self):
-        cases = {
-            'until=2027-03-31 by=yamada -- 外部ライブラリが setter 注入だけを提供する': 0,
-            'until=2026-11-22 by=yamada -- 期限切れ': 1,
-            'until=2028-01-01 by=yamada -- 期限が遠すぎる': 1,
-            'until=2027-03-31 -- 承認者なし': 1,
-            'until=2027-03-31 by=yamada': 1,
-            'until=next-week by=yamada -- 日付ではない': 1,
-        }
-        for fields, expected in cases.items():
+        self.write(CONTROLLER, FIELD_INJECTION.replace('import com.example.order.mapper.OrderMapper;\n', ''))
+        cases = [({}, 0), ({'until': '2026-11-22'}, 1), ({'until': '2028-01-01'}, 1), ({'by': None}, 1),
+                 ({'reason': ''}, 1), ({'until': 'next-week'}, 1), ({'rule': 'no-such-rule'}, 1)]
+        for fields, expected in cases:
             with self.subTest(fields=fields):
-                self.write(CONTROLLER, FIELD_INJECTION.replace(
-                    'import com.example.order.mapper.OrderMapper;\n', '').replace(
-                    '    @Autowired\n', f'    // guard:allow java-no-field-injection {fields}\n    @Autowired\n'))
+                self.allow(self.field_injection_allow(**fields))
                 code, out = self.run_guard()
                 self.assertEqual(code, expected, out)
                 if expected:
-                    self.assertIn('[guard-allow]', out)
+                    self.assertIn(f'{guard.ALLOWLIST}:1: [guard-allow] allow[0]：', out)
+                    self.assertIn('[java-no-field-injection]', out, 'an invalid exception covers nothing')
+                else:
+                    self.assertIn('例外 1 件', out)
+        self.allow(self.field_injection_allow())
+        code, out = self.run_guard('--list')
+        self.assertIn('java-no-field-injection  [ベースライン未登録、例外 1 件]', out)
 
-    def test_allow_covers_only_its_rule_and_lines(self):
-        self.write(CONTROLLER, FIELD_INJECTION.replace(
-            'import com.example.order.mapper.OrderMapper;',
-            'import com.example.order.mapper.OrderMapper; // guard:allow java-no-field-injection until=2027-01-31 by=sato -- 別ルール'))
+    def test_allow_covers_only_its_rule_file_and_line(self):
+        self.write(CONTROLLER, FIELD_INJECTION)
+        self.allow(self.field_injection_allow(match='private OrderMapper'),
+                   self.field_injection_allow(path='src/main/java/com/example/order/Other.java'))
         code, out = self.run_guard()
         self.assertEqual(code, 1, out)
         self.assertIn('[controller-no-persistence]', out)
-        self.assertIn('[java-no-field-injection]', out)
-        self.assertIn('使われていない例外', out)
+        self.assertIn('[java-no-field-injection]', out, 'the match must be on the reported line')
+        self.assertEqual(out.count('使われていない例外'), 2)
 
-    def test_allow_with_unknown_rule_fails_and_allow_text_is_not_scanned(self):
-        self.write('src/main/java/com/example/A.java',
-                   'class A {\n    // guard:allow no-such-rule until=2027-01-31 by=sato -- 暫定対応の説明\n}\n')
+    def test_allow_json_must_be_valid(self):
+        self.write(guard.ALLOWLIST, '{"allow": {}}')
         code, out = self.run_guard()
-        self.assertEqual(code, 1, out)
-        self.assertIn("[guard-allow] 未知のルール 'no-such-rule'", out)
-        self.assertNotIn('[comment-workaround]', out)
+        self.assertEqual(code, 2, out)
+        self.assertIn(guard.ALLOWLIST, out)
 
-    def test_allow_in_jsp_comment(self):
+    def test_inline_allow_comments_are_violations_and_point_to_the_allow_list(self):
         self.write('src/main/webapp/WEB-INF/jsp/a.jsp',
                    '<%-- guard:allow jsp-no-scriptlet until=2027-01-31 by=sato -- ベンダー提供タグの制約 --%>\n<%= x %>\n')
         code, out = self.run_guard()
-        self.assertEqual(code, 0, out)
-        self.assertIn('例外 1 件', out)
+        self.assertEqual(code, 1, out)
+        self.assertIn('src/main/webapp/WEB-INF/jsp/a.jsp:1: [guard-allow] ', out)
+        self.assertIn(guard.ALLOWLIST, out)
+        self.assertIn('[jsp-no-scriptlet]', out)
+
+    def test_template_allow_list_is_empty_and_valid(self):
+        data = json.loads((PROJECT / guard.ALLOWLIST).read_text(encoding='utf-8'))
+        self.assertEqual(data['allow'], [])
 
     def test_broken_rule_is_a_configuration_error(self):
         rules = json.loads((self.root / guard.RULES).read_text(encoding='utf-8'))

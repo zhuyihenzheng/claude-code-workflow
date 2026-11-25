@@ -79,6 +79,7 @@ CLAUDE.md                         @AGENTS.md + Claude Code 专属补充
 .claude/skills/change-flow/       改修的标准流程：设计书 → 实现 → 单体测试 → 画面试验 → 试验书
 .claude/skills/correct/           被纠正后的标准流程：把错误落到设计、类型、guard 规则或测试上
 .claude/skills/feature-map/       功能地图的创建与更新
+.claude/skills/knowledge/         每次作业结束时把确认过的事实（用语、代码位置、注意点）写回 docs/knowledge/
 .claude/hooks/verify-stop.py      Stop hook 参考样例（未注册）
 .claude/README.md                 给人看的配置说明（不进会话上下文）
 .github/copilot-instructions.md   Copilot 入口摘要
@@ -88,15 +89,22 @@ CLAUDE.md                         @AGENTS.md + Claude Code 专属补充
 REVIEW.md                         评审顺序与观点：Claude 的评审子代理、Copilot code review 与人审共用
 config/copilot/                   Copilot 的内容排除清单（与 settings 的 deny 一致）与设置说明
 config/guard/rules.json           guard 规则：每条带修法、来源与真实错误样例（起始 10 条）
+config/guard/allow.json           guard 的例外：只由人登记（期限、批准人、理由）；编辑为 ask，CODEOWNERS 管
+config/spec-sync.json             设计书的表与代码的值的对应（例如消息一览 ↔ messages.properties）
 config/pmd/jsp-ruleset.xml        PMD 的 JSP 转义检查（NoUnsanitizedJSPExpression）
 config/quality/pom-snippet.xml    加进 pom.xml 的 ArchUnit 依赖与 maven-pmd-plugin，二者都在 ./mvnw verify 中运行
 docs/feature-map/README.md        功能地图的书式：一个功能一个文件，命令与合格结果
+docs/knowledge/README.md          项目知识的书式：用语集（业务用语 ↔ 代码名）与代码地图（功能 ID ↔ 文件、注意点）
 .mcp.json                         Context7 + 隔离的 Playwright
 scripts/sync_rules.py             rules → Copilot 指令的同步与 --check
 scripts/guard.py                  确定性检查：新违规、过期例外、写坏的规则即失败；既有违规只减不增
 scripts/htmx-check.mjs            真实浏览器验证 HTMX 片段替换（含登录态、会话失效）
 scripts/xlsx2ai.py                Excel 设计书 → 按 sheet 拆分的 Markdown（表、标题、缩进列表、Mermaid）与 JSON
-scripts/xlsx_patch.py             按变更指示改 Excel：只动指定的单元格，其余逐字节不变
+scripts/xlsx_patch.py             按变更指示改 Excel：只动指定的单元格（可在表下的空行追加行），其余逐字节不变
+scripts/spec_sync.py              设计书的表与代码的值是否一致：查实现遗漏与设计书漏改
+scripts/junit_report.py           JUnit 结果 → 単体テスト成績書（Markdown 与 Excel，观点取自 @DisplayName）
+scripts/knowledge_check.py        docs/knowledge/ 里的路径、功能 ID、用语是否过期
+scripts/ai_metrics.py             AI 的 PR 每月的返工、变更要求、一次通过率，以及新增规则与知识更新的次数
 screen-tests/                     （可选）画面试验：固定版本的 midscene-poc
 src/test/java/ArchitectureTest.java （可选，--with-archunit）按编译后的依赖检查分层与字段注入
 .gitignore / .gitattributes       补充缺失规则
@@ -120,6 +128,7 @@ python3 -m unittest discover -s tests -v
 | `guard.py`：单元测试（三平台）；示例应用上通过、注入真实错误后报出修法；功能地图里的命令在运行中的应用上逐条执行（Ubuntu） | 起始规则在真实业务代码上的误报率；`correct` 在真实纠正上的表现 |
 | ArchUnit 与 PMD：示例应用的 `./mvnw verify`；同包引用 guard 查不到而 ArchUnit 失败；未转义的 EL 使 PMD 失败（Ubuntu） | 多模块、既有大量违规的项目上的导入（Freezing 与 `maxAllowedViolations`） |
 | Excel 设计书 → Markdown：合成工作簿的单元测试（三平台）；示例应用的 Excel 版设计书经转换后，画面试验的观点覆盖与 Markdown 原稿一致（Ubuntu） | 版式与公开样本不同的真实设计书上的还原质量 |
+| 単体テスト成績書：示例应用的 `./mvnw verify` 结果生成 Markdown 与 Excel，观点取自 `@DisplayName`（Ubuntu）；`spec_sync.py`、`knowledge_check.py`、`ai_metrics.py`、`xlsx_patch.py` 的追加行：单元测试（三平台） | 真实项目上的知识积累是否让改修变准（用 `ai_metrics.py` 看几个月的趋势）；设计书与代码的对应能登记多少 |
 
 本地测试不调用 Claude API；缺少 Playwright 时浏览器测试会跳过，CI 中强制执行。逐轮的问题与修复记录见 [09 · 审查与修复](docs/09-审查与修复.md)，Windows 搭建见 [02 · 基础搭建](docs/02-基础搭建.md#6-windows-两条路径)。
 

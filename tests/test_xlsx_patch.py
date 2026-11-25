@@ -259,6 +259,61 @@ class XlsxPatchTests(unittest.TestCase):
         self.assertIn('ファイルの削除：xl/media/image1.png', log)
 
 
+    def test_rows_are_appended_into_the_empty_rows_below_a_table(self):
+        from openpyxl.styles import Border, Side
+        book = self.dir / '設計書.xlsx'
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = 'メッセージ一覧'
+        thin = Border(*(Side(style='thin'),) * 4)
+        ws.append(['メッセージID', 'メッセージ', '区分'])
+        ws.append(['E001', '名前を入力してください', 'エラー'])
+        ws.append(['E002', '数量は 1 以上を入力してください', 'エラー'])
+        for col in 'ABC':
+            ws[f'{col}3'].border = thin
+        for row in (4, 5):  # rows prepared in the template: bordered, but empty (column C has no cell yet)
+            ws[f'A{row}'].border = thin
+            ws[f'B{row}'].border = thin
+        ws['A6'] = '■ 補足'
+        ws['B9'] = '=COUNTA(A2:A5)'
+        wb.save(book)
+        before = self.dir / 'before.xlsx'
+        before.write_bytes(book.read_bytes())
+        rows = [{'メッセージID': 'E003', 'メッセージ': '在庫が不足しています', '区分': 'エラー'},
+                {'メッセージID': 'I001', 'メッセージ': '登録しました'}]
+        patch = self.patch({'sheet': 'メッセージ一覧', 'table': {'key': 'メッセージID', 'append': rows}})
+        code, out = run('apply', book, patch)
+        self.assertEqual(code, 0, out)
+        self.assertIn('5 セルを変更しました', out)
+        ws = openpyxl.load_workbook(book)['メッセージ一覧']
+        self.assertEqual([[c.value for c in r] for r in ws['A4:C5']],
+                         [['E003', '在庫が不足しています', 'エラー'], ['I001', '登録しました', None]])
+        for ref in ('A4', 'B4', 'C4', 'C5'):
+            self.assertEqual(ws[ref].border.left.style, 'thin', f'{ref} continues the table format')
+        self.assertEqual(ws['A6'].value, '■ 補足')
+        self.assertEqual(run('diff', before, book, '--expect', patch)[0], 0, 'a person adding the same rows passes')
+        self.assertEqual(run('apply', book, patch)[1].strip(), '変更はありません（すべて指示どおりの値になっています）')
+
+        third = rows + [{'メッセージID': 'W001', 'メッセージ': '確認してください'}]
+        changed = {'sheet': 'メッセージ一覧', 'table': {'key': 'メッセージID', 'append': [{'メッセージID': 'E003', 'メッセージ': '別の文言'}]}}
+        for data, message in ((third, '表の下の 6 行目が空いていません（A6）'), (changed['table']['append'], 'E003」の行は既にあります'),
+                              ([{'メッセージ': 'キーなし'}], 'キー列「メッセージID」の値が必要です'),
+                              ([{'メッセージID': 'X', '備考': 'x'}], '列「備考」が見出しにありません')):
+            with self.subTest(message=message):
+                saved = book.read_bytes()
+                code, out = run('apply', book, self.patch({'sheet': 'メッセージ一覧', 'table': {'key': 'メッセージID', 'append': data}}))
+                self.assertEqual(code, 2, out)
+                self.assertIn(message, out)
+                self.assertEqual(book.read_bytes(), saved)
+
+    def test_a_footer_in_the_key_column_is_not_part_of_the_table(self):
+        patch = self.patch({'sheet': '試験結果', 'table': {'key': 'ケースID', 'append': [
+            {'ケースID': 'C-03', '判定': 'OK'}, {'ケースID': 'C-04', '判定': 'OK'}, {'ケースID': 'C-05', '判定': 'OK'}]}})
+        code, out = run('apply', self.book, patch)
+        self.assertEqual(code, 2, out)
+        self.assertIn('表の下の 8 行目が空いていません（A8、C8）', out)
+        self.assertEqual(self.book.read_bytes(), self.original)
+
     def rewrite(self, source, dest, **parts):
         """Copy a workbook replacing whole parts: rewrite(src, dst, **{'xl/workbook.xml': fn}) with fn(text) -> text."""
         with zipfile.ZipFile(source) as src, zipfile.ZipFile(dest, 'w', zipfile.ZIP_DEFLATED) as dst:

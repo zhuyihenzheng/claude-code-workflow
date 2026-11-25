@@ -79,8 +79,8 @@ node scripts/htmx-check.mjs --storage-state target/htmx-check/state.json --clear
 [`project/scripts/guard.py`](project/scripts/guard.py) 按 [`project/config/guard/rules.json`](project/config/guard/rules.json) 检查代码，只用标准库（Python 3.9+）。退出码 `0` 通过、`1` 有新违规、`2` 规则或配置有误（未完成检查，不能当成通过）。每条规则带修法（`message`）、来源（`origin`）和真实错误样例（`examples`），每次运行先自检样例。
 
 - **导入已有项目**：先运行 `python3 scripts/guard.py`。既有违规多时，由人执行一次 `python3 scripts/guard.py --init-baseline`，接受现状；此后件数只减不增，修好后用 `--update-baseline` 收紧。基线写入 `config/guard/baseline.json`，请提交。
-- **例外**：写在违规行或上一行，`guard:allow <规则ID> until=YYYY-MM-DD by=<批准人> -- <理由>`，期限 1 年内。agent 不写例外。
-- **权限**：检查、`--list`、`--update-baseline` 预先允许；`--init-baseline` 与编辑基线文件为 ask。
+- **例外**：由人登记在 `config/guard/allow.json`（规则、文件、违规行里的文字、期限 1 年内、批准人、理由）。写在源码注释里的 `guard:allow` 会被当成违规，因为 agent 不经批准就能写。
+- **权限**：检查、`--list`、`--update-baseline` 预先允许；`--init-baseline` 与编辑 `config/guard/`（规则、基线、例外）为 ask。
 - **CI**：`ci.yml.example` 在构建前运行 guard；`install.py doctor` 也会运行它，并核对 AGENTS.md 里 `〔guard: id〕` 标注的规则都存在。
 - **增长规则**：人纠正 agent 后，skill [`correct`](project/.claude/skills/correct/SKILL.md) 按“设计 → 类型 → guard 规则 → 测试 → 文字”的顺序落地，并在 AGENTS.md 标注。
 - **功能地图**：[`project/docs/feature-map/`](project/docs/feature-map/README.md) 与 skill [`feature-map`](project/.claude/skills/feature-map/SKILL.md)。一个功能一个文件，写可执行的命令与合格结果；code-reviewer 与 [PR 模板](project/.github/pull_request_template.md)从这些证据开始。
@@ -95,6 +95,15 @@ node scripts/htmx-check.mjs --storage-state target/htmx-check/state.json --clear
 - `--with-screen-tests` 安装 [`project/screen-tests/`](project/screen-tests/README.md)：一个固定了 [midscene-poc](https://github.com/zhuyihenzheng/midscene-poc) 提交 SHA 的 Node 项目。它不随默认安装，因为需要 Node、浏览器和从 GitHub 取包。
 - [`project/scripts/xlsx_patch.py`](project/scripts/xlsx_patch.py) 按变更指示（JSON）改 Excel，只用标准库。`apply` 写入前自检，`diff --expect` 核对人的修改。
 - skill [`change-flow`](project/.claude/skills/change-flow/SKILL.md) 把设计书、实现、单体测试、画面试验、试验书串成一条流程。
+- `xlsx_patch.py` 的 `table.append` 在表下的空行追加行（沿用最后一行的格式；没有空行就停下，不插入行）。
+- [`project/scripts/spec_sync.py`](project/scripts/spec_sync.py) 按 `config/spec-sync.json` 比较设计书的表（含 `xlsx2ai.py` 生成的 Markdown）与代码里用正则取出的值，报告实现遗漏、设计书漏改与值不同。
+- [`project/scripts/junit_report.py`](project/scripts/junit_report.py) 从 `target/surefire-reports/` 生成 単体テスト成績書（Markdown 与 Excel），观点取自测试的 `@DisplayName`。
+
+## 越用越准：项目知识与度量
+
+- skill [`knowledge`](project/.claude/skills/knowledge/SKILL.md)：每次作业结束时，把这次确认过的事实写回 [`project/docs/knowledge/`](project/docs/knowledge/README.md)：用语集（委托里的业务用语 ↔ 画面项目名、类名、表名）与代码地图（功能 ID ↔ 画面、Controller、设计书、测试、注意点）。作业开始时先读它们。
+- [`project/scripts/knowledge_check.py`](project/scripts/knowledge_check.py)：知识里写的路径不存在、功能 ID 不在功能地图里、用语重复时失败（CI 示例与 `doctor` 都会运行），不让过期的知识误导下一次作业。
+- [`project/scripts/ai_metrics.py`](project/scripts/ai_metrics.py)：用 `gh` 取已合并的 PR，按月统计 AI 的 PR 的一次通过率、评审后的返工提交数、变更要求数，并从 git 历史统计新增的 guard 规则与知识更新次数。一次通过率上升、返工下降，才说明“越来越准”。
 
 背景、分工与验证范围见 [14 · 改修流程与画面试验](../docs/14-改修流程与画面试验.md)。
 

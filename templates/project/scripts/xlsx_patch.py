@@ -17,6 +17,9 @@ AI ツールに Excel を直接編集させると、行の取り違えや、画�
   cells  セル番地で指定する。from は現在の値（空欄は ""）。一致しなければ何も書かずに終了する。
   table  見出し行の列名と、キー列の値で行を特定する。行番号は書かない。キーが 0 行または複数行に
          一致した場合は何も書かずに終了する。値は文字列、または {"from": …, "to": …}。
+         "append": [{"ケースID": "C-10", "備考": "…"}] で表に行を追加する。表の最後の行のすぐ下の空き行に
+         書き、書式（罫線・表示形式）は最後の行から引き継ぐ。行は挿入しないため、下の行が空いていなければ
+         何も書かずに終了する。キーが既にある場合も終了する。
 
 apply は、対象シートの XML の該当セルだけを書き換え、他のファイル（画像・書式・他シート）は
 そのままコピーする。保存前に「指示したセルだけが、指示した値になった」ことを確認する。
@@ -28,7 +31,8 @@ diff は 2 つのブックを比べ、変わったセルと、シート以外で
 図形の参照を比べる。セルの書式はスタイル番号ではなく、フォント・塗りつぶし・罫線・表示形式の定義そのものを
 比べる。画像・図形・テーマ・シート構成・名前の定義が変わった場合は差分として報告する。
 
-制限：数式セル・結合セルの左上以外には書き込まない。書き込む値は文字列（改行は LF にそろえ、XML に書けない
+制限：数式セル・結合セルの左上以外には書き込まない。行の挿入・削除、結合の変更はしない（人が Excel で行い、
+diff --expect で確認する）。書き込む値は文字列（改行は LF にそろえ、XML に書けない
 制御文字は拒否する）。新しく作るセルに書式は付かない。
 終了コード：0 = 成功／差分は指示どおり、1 = 指示にない差分がある、2 = 指示が適用できない・入力が不正。
 """
@@ -187,9 +191,10 @@ def normalize_text(text):
 
 
 def plan_sheet(spec, cells, blocked):
-    """Resolve one sheet's instructions to {ref: new text}. Raises PatchError without side effects."""
+    """Resolve one sheet's instructions to ({ref: new text}, {ref: style of a new cell}).
+    Raises PatchError without side effects."""
     sheet = spec['sheet']
-    planned = {}
+    planned, styles = {}, {}
 
     def text_of(ref):
         return planned.get(ref, cells.get(ref, ('', None, False))[0])
@@ -250,16 +255,71 @@ def plan_sheet(spec, cells, blocked):
                 if name not in headers:
                     raise PatchError(f'{sheet}：列「{name}」が見出しにありません（追加する場合は add_columns に書く）')
                 put(f'{headers[name]}{rows[0]}', change, f'{key}={row_key}')
-    return planned
+        append_rows(sheet, table.get('append') or [], key, headers, header_row, by_key, cells, put, planned, styles, blocked)
+    return planned, styles
+
+
+def append_rows(sheet, appended, key, headers, header_row, by_key, cells, put, planned, styles, blocked):
+    """Write new keyed rows into the empty rows right below the table's last row (no row is inserted).
+    New cells take the format of the same column in the last row, so borders and number formats continue."""
+    if not isinstance(appended, list) or not all(isinstance(values, dict) for values in appended):
+        raise PatchError(f'{sheet}：append は {{列名: 値}} の配列で指定してください')
+    if not appended:
+        return
+    columns = sorted(col_index(letters) for letters in headers.values())
+    # The table is the unbroken run of rows below the header that have a key and at least one other value.
+    # It ends at the first row without one, so a heading or a footer such as 合計 below it is not a row of it.
+    keyed = {row for rows in by_key.values() for row in rows}
+    filled = {split_ref(ref)[1] for ref, (text, _style, formula) in cells.items()
+              if split_ref(ref)[0] != headers[key] and col_index(split_ref(ref)[0]) in columns and (text.strip() or formula)}
+    last = header_row
+    while last + 1 in keyed and (last + 1 in filled or len(columns) == 1):
+        last += 1
+    row = last
+    for values in appended:
+        row_key = values.get(key)
+        if not isinstance(row_key, str) or not row_key.strip():
+            raise PatchError(f'{sheet}：append の各行にはキー列「{key}」の値が必要です')
+        for name, value in values.items():
+            if name not in headers:
+                raise PatchError(f'{sheet}：列「{name}」が見出しにありません（追加する場合は add_columns に書く）')
+            if not isinstance(value, str):
+                raise PatchError(f'{sheet}：{key}={row_key}（追加）：append の値は文字列で指定してください')
+        row_key = row_key.strip()
+        if row_key in by_key:
+            existing = by_key[row_key]
+            if len(existing) == 1 and all(cells.get(f'{headers[n]}{existing[0]}', ('',))[0]
+                                          == normalize_text(v) for n, v in values.items() if n != key):
+                continue  # added by an earlier run with the same values, so running the instructions again is harmless
+            raise PatchError(f'{sheet}：{key}「{row_key}」の行は既にあります（既存の行の変更は rows に書く）')
+        row += 1
+        occupied = sorted(ref for ref, (text, _style, formula) in cells.items()
+                          if split_ref(ref)[1] == row and columns[0] <= col_index(split_ref(ref)[0]) <= columns[-1]
+                          and (text.strip() or formula))
+        if occupied:
+            raise PatchError(f'{sheet}：表の下の {row} 行目が空いていません（{"、".join(occupied)}）。'
+                             '行の挿入は人が Excel で行い、diff --expect で確認してください')
+        by_key[row_key] = [row]
+        for name, value in values.items():
+            put(f'{headers[name]}{row}', value, f'{key}={row_key}（追加）')
+        if last > header_row:
+            for letters in headers.values():
+                ref, source = f'{letters}{row}', cells.get(f'{letters}{last}', ('', None, False))[1]
+                if ref not in cells and source is not None and ref not in blocked:
+                    styles[ref] = source
+                    planned.setdefault(ref, '')
 
 
 def cell_xml(ref, text, style):
     style_attr = f' s="{style}"' if style is not None else ''
+    if not text:
+        return f'<c r="{ref}"{style_attr}/>'
     return f'<c r="{ref}"{style_attr} t="inlineStr"><is><t xml:space="preserve">{escape(text)}</t></is></c>'
 
 
-def write_cells(xml, planned, cells):
-    """Return the sheet XML with only the planned cells replaced or inserted."""
+def write_cells(xml, planned, cells, styles=None):
+    """Return the sheet XML with only the planned cells replaced or inserted.
+    styles gives the format of cells that do not exist yet (rows added below a table)."""
     by_row = {}
     for ref, text in planned.items():
         by_row.setdefault(split_ref(ref)[1], []).append((ref, text))
@@ -272,7 +332,7 @@ def write_cells(xml, planned, cells):
         else:
             body, tail = row_xml[head_end:-len('</row>')], '</row>'
         for ref, text in sorted(changes, key=lambda change: col_index(split_ref(change[0])[0])):
-            style = cells.get(ref, ('', None, False))[1]
+            style = cells[ref][1] if ref in cells else (styles or {}).get(ref)
             new, column = cell_xml(ref, text, style), col_index(split_ref(ref)[0])
             existing = next((c for c in CELL.finditer(body) if attr(c.group(0)[:tag_end(c.group(0))], 'r') == ref), None)
             if existing:
@@ -408,22 +468,29 @@ def build_plan(book, specs):
                 raise PatchError(f'シート「{spec["sheet"]}」がありません（シート：{"、".join(parts)}）')
             xml = zf.read(parts[spec['sheet']]).decode('utf-8')
             cells = read_cells(xml, strings)
-            planned = plan_sheet(spec, cells, merged_non_anchor(xml))
+            planned, styles = plan_sheet(spec, cells, merged_non_anchor(xml))
             if planned:
-                plan[parts[spec['sheet']]] = (spec['sheet'], planned, cells, xml)
+                plan[parts[spec['sheet']]] = (spec['sheet'], planned, cells, xml, styles)
     return plan
+
+
+def changed_cells(plan):
+    """Cells whose text changes (format-only cells added with a new row are not counted)."""
+    return sum(1 for _sheet, planned, cells, _xml, _styles in plan.values()
+               for ref, text in planned.items() if text != cells.get(ref, ('',))[0])
 
 
 def apply(book, specs, out=None, dry_run=False, log=print):
     plan = build_plan(book, specs)
-    for sheet, planned, cells, _xml in plan.values():
+    for sheet, planned, cells, _xml, _styles in plan.values():
         for ref in sorted(planned, key=lambda r: (split_ref(r)[1], col_index(split_ref(r)[0]))):
-            log(f'{sheet}!{ref}：{cells.get(ref, ("",))[0]!r} → {planned[ref]!r}')
+            if planned[ref] != cells.get(ref, ('',))[0]:
+                log(f'{sheet}!{ref}：{cells.get(ref, ("",))[0]!r} → {planned[ref]!r}')
     if not plan:
         log('変更はありません（すべて指示どおりの値になっています）')
         return 0
     if dry_run:
-        log(f'{sum(len(p[1]) for p in plan.values())} セルを変更します（--dry-run のため書き込んでいません）')
+        log(f'{changed_cells(plan)} セルを変更します（--dry-run のため書き込んでいません）')
         return 0
     target = Path(out or book)
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -434,8 +501,8 @@ def apply(book, specs, out=None, dry_run=False, log=print):
             for info in src.infolist():
                 data = src.read(info.filename)
                 if info.filename in plan:
-                    _sheet, planned, cells, xml = plan[info.filename]
-                    data = write_cells(xml, planned, cells).encode('utf-8')
+                    _sheet, planned, cells, xml, styles = plan[info.filename]
+                    data = write_cells(xml, planned, cells, styles).encode('utf-8')
                 dst.writestr(info, data, compress_type=info.compress_type)
         problems = compare(book, temp, expected={part: p[1] for part, p in plan.items()})[1]
         if problems:
@@ -444,7 +511,7 @@ def apply(book, specs, out=None, dry_run=False, log=print):
     finally:
         if os.path.exists(temp):
             os.unlink(temp)
-    log(f'{sum(len(p[1]) for p in plan.values())} セルを変更しました：{target}')
+    log(f'{changed_cells(plan)} セルを変更しました：{target}')
     return 0
 
 

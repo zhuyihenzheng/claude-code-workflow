@@ -180,14 +180,14 @@ class TemplateTests(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertTrue(matching('ask', command))
         self.assertTrue(matching('ask', 'py scripts/guard.py --init-baseline', 'PowerShell'))
-        self.assertIn('Edit(/config/guard/baseline.json)', perms['ask'])
+        self.assertIn('Edit(/config/guard/**)', perms['ask'])
 
     def test_guard_runs_in_ci_and_the_skills_name_real_files(self):
         self.assertIn('run: python3 scripts/guard.py --format github\n',
                       (PROJECT / '.github/workflows/ci.yml.example').read_text(encoding='utf-8'))
-        for name in ('correct', 'feature-map', 'spring-endpoint', 'change-flow'):
+        for name in ('correct', 'feature-map', 'spring-endpoint', 'change-flow', 'knowledge'):
             text = (PROJECT / '.claude/skills' / name / 'SKILL.md').read_text(encoding='utf-8')
-            for path in set(re.findall(r'(?:scripts|config/guard|docs/feature-map)/[\w./-]+\.(?:py|mjs|json|md)', text)):
+            for path in set(re.findall(r'(?:scripts|config|docs/feature-map)/[\w./-]+\.(?:py|mjs|json|md)', text)):
                 with self.subTest(skill=name, path=path):
                     self.assertTrue((PROJECT / path).is_file(), path)
 
@@ -245,7 +245,7 @@ class TemplateTests(unittest.TestCase):
                      '/.claude/', '/screen-tests/baseline.json'):
             self.assertIn(path, paths)
         review = (PROJECT / 'REVIEW.md').read_text(encoding='utf-8')
-        for needle in ('guard:allow', 'baseline.json', 'レビュー未完了', '証跡'):
+        for needle in ('allow.json', 'baseline.json', 'レビュー未完了', '証跡'):
             self.assertIn(needle, review)
         self.assertIn('REVIEW.md', (PROJECT / '.claude/agents/code-reviewer.md').read_text(encoding='utf-8'))
         self.assertIn('REVIEW.md', (PROJECT / '.github/copilot-instructions.md').read_text(encoding='utf-8'))

@@ -1,0 +1,11 @@
+{
+  "_note": "設計書の表とコードの値の対応（scripts/spec_sync.py）。checks に 1 件ずつ追加する。書き方は _example と scripts/spec_sync.py の冒頭を参照。",
+  "_example": {
+    "id": "messages",
+    "design": {"file": "specs-ai/設計書/sheets/メッセージ一覧.md", "key": "メッセージID", "value": "メッセージ"},
+    "code": {"files": ["src/main/resources/messages*.properties"], "pattern": "^(?P<key>[A-Za-z0-9_.-]+)\\s*[=:]\\s*(?P<value>.*)$"},
+    "normalize": ["placeholders", "whitespace"],
+    "ignore_keys": ["^spring\\."]
+  },
+  "checks": []
+}
