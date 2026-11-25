@@ -82,7 +82,7 @@
       "id": "test-no-disabled",
       "files": ["**/src/test/java/**/*.java"],
       "pattern": "^\\s*@(?:Disabled|Ignore)\\b",
-      "message": "テストを無効化して通さない。失敗の原因を直す（実装の不具合なら実装を、期待値の誤りなら設計書を根拠に期待値を直す）。どうしても止める場合は人が guard:allow（期限・承認者・理由）を付ける。",
+      "message": "テストを無効化して通さない。失敗の原因を直す（実装の不具合なら実装を、期待値の誤りなら設計書を根拠に期待値を直す）。どうしても止める場合は人が config/guard/allow.json に例外（期限・承認者・理由）を登録する。",
       "origin": "AGENTS.md「コーディング規約」（テスト）",
       "examples": {
         "bad": ["@Disabled\n@Test\nvoid createsOrder() {", "    @Ignore(\"不安定なため\")\n    @Test"],

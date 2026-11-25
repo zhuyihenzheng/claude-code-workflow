@@ -9,6 +9,7 @@
 /config/pmd/                           @OWNER
 /config/quality/                       @OWNER
 /src/test/java/ArchitectureTest.java   @OWNER
+/config/spec-sync.json                 @OWNER
 
 # AI へのルールとレビュー基準
 /AGENTS.md                             @OWNER

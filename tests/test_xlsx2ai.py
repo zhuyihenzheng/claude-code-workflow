@@ -4,8 +4,11 @@ import io
 import json
 import os
 from pathlib import Path
+import sys
 import tempfile
+import time
 import unittest
+from unittest import mock
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -258,6 +261,31 @@ class Xlsx2AiTests(unittest.TestCase):
         self.assertEqual(run(self.src, self.out, '--extract-media')[0], 0)
         self.assertTrue((self.out / 'pics' / 'media' / 'image1.png').is_file())
 
+    def test_a_failed_replace_keeps_the_previous_output(self):
+        book = self.src / 'a.xlsx'
+        make_book(book)
+        self.assertEqual(run(self.src, self.out)[0], 0)
+        index = self.out / 'a' / 'index.md'
+        before = index.read_text(encoding='utf-8')
+        make_book(book, flow_on_sheet='表紙')
+        real_rename = Path.rename
+
+        def locked(self_path, target):
+            if self_path.name == 'book':
+                raise PermissionError('locked by another process')
+            return real_rename(self_path, target)
+
+        with mock.patch.object(Path, 'rename', locked):
+            code, log = run(self.src, self.out)
+        self.assertEqual(code, 2, log)
+        self.assertIn('失敗：', log)
+        self.assertNotIn('Traceback', log)
+        self.assertEqual(index.read_text(encoding='utf-8'), before)
+        self.assertEqual(run(self.src, self.out, '--check')[0], 1, 'the book stays stale until it converts')
+        self.assertEqual(run(self.src, self.out)[0], 0)
+        self.assertTrue((self.out / 'a' / 'flows' / '表紙.mmd').is_file())
+        self.assertEqual(sorted(p.name for p in self.out.iterdir() if p.name.startswith('.') and p.is_dir()), [])
+
     def test_broken_workbook_fails_alone_without_partial_output(self):
         (self.src / 'broken.xlsx').write_bytes(b'not a zip')
         make_book(self.src / 'good.xlsx')
@@ -377,6 +405,54 @@ class SheetMarkdownTests(unittest.TestCase):
         self.assertIn('| 項目 | 規則 |\n|---|---|\n| 名前 | 必須 |\n\n- 〈登録〉を押すと、フォームの領域だけを置き換える。\n', md)
         self.assertIn('| 名前が未入力 | 名前を入力してください |\n\n- 入力値は保持する。\n', md)
 
+    def test_group_header_row_starting_in_the_same_column(self):
+        md = xlsx2ai.sheet_markdown('s', grid(
+            (1, {1: '基本情報', 5: '連絡先'}),
+            (2, {1: '氏名', 3: '年齢', 5: '電話', 7: 'メール'}),
+            (3, {1: '山田', 3: 30, 5: '03-0000-0000', 7: 'a@example.com'}),
+            (4, {1: '佐藤', 3: 41, 5: '06-0000-0000', 7: 'b@example.com'}),
+        ))
+        self.assertIn('| 基本情報/氏名 | 基本情報/年齢 | 連絡先/電話 | 連絡先/メール |\n|---|---|---|---|\n'
+                      '| 山田 | 30 | 03-0000-0000 | a@example.com |', md)
+
+    def test_a_remark_right_of_a_table_does_not_split_it(self):
+        md = xlsx2ai.sheet_markdown('s', grid(
+            (1, {1: 'No.', 3: '項目', 6: '値'}),
+            (2, {1: 1, 3: 'a', 6: 'x'}),
+            (3, {1: 2, 3: 'b', 6: 'y', 12: '※要確認'}),
+            (4, {1: 3, 3: 'c', 6: 'z'}),
+        ))
+        self.assertIn('| No. | 項目 | 値 |  |\n|---|---|---|---|\n| 1 | a | x |  |\n| 2 | b | y | ※要確認 |\n| 3 | c | z |  |\n', md)
+
+    def test_the_next_table_or_a_milestone_row_is_not_taken_as_a_remark(self):
+        md = xlsx2ai.sheet_markdown('s', grid(
+            (1, {1: '支払条件', 3: '月末締め翌月末払い'}),
+            (2, {1: '部分納品', 3: '受領日から起算する'}),
+            (3, {1: '支払対象', 5: '受領', 7: '支払期日'}),
+            (4, {1: '外部設計', 5: '1/29', 7: '2/26'}),
+            (6, {1: '検収', 9: '◆ 6/14'}),
+            (7, {1: 'リリース', 11: '◆ 6/30'}),
+        ))
+        self.assertIn('| 部分納品 | 受領日から起算する |\n\n| 支払対象 | 受領 | 支払期日 |\n|---|---|---|\n| 外部設計 | 1/29 | 2/26 |\n', md)
+        self.assertIn('- 検収 ◆ 6/14\n- リリース ◆ 6/30\n', md)
+
+    def test_long_sheets_convert_in_linear_time(self):
+        prose = grid(*[(r, {1: 'a', 2: 'b'} if r % 2 else {1: 'c'}) for r in range(1, 3001)])
+        table = grid((1, {1: 'No.', 2: '値'}), *[(r, {1: r, 2: 'x'}) for r in range(2, 3002)])
+        started = time.perf_counter()
+        md, md_table = xlsx2ai.sheet_markdown('s', prose), xlsx2ai.sheet_markdown('t', table)
+        self.assertLess(time.perf_counter() - started, 2.0)
+        self.assertEqual(md.count('- a b'), 1500)
+        self.assertEqual(md_table.count(' | x |'), 3000)
+
+    def test_titles_are_judged_before_markdown_escaping(self):
+        md = xlsx2ai.sheet_markdown('s', grid((1, {1: '■ <input> の扱い'}), (2, {2: '本文'})))
+        self.assertIn('## ■ \\<input> の扱い\n', md)
+
+    def test_flow_titles_match_sheet_names_with_surrounding_spaces(self):
+        text = '# book\n\n## フロー\n\n```mermaid\nflowchart TD\n  A --> B\n```\n\n## 表紙\n\nx\n'
+        self.assertEqual(xlsx2ai.flows_from_markdown(text, {'フロー ', '表紙'}), {'フロー ': 'flowchart TD\n  A --> B\n'})
+
     def test_empty_sheet_and_shape_flow(self):
         self.assertEqual(xlsx2ai.sheet_markdown('空', []), '# 空\n')
         md = xlsx2ai.sheet_markdown('フロー', grid((1, {1: '処理フロー'})), 'flowchart TD\n  A --> B\n')
@@ -392,6 +468,32 @@ class InspectDrawingsTests(unittest.TestCase):
             stats = xlsx2ai.inspect_drawings(path)
         self.assertEqual(stats['表紙'], {'shapes': len(NODES), 'connectors': len(EDGES), 'pictures': 0})
         self.assertEqual(stats['テーブル一覧'], {'shapes': 0, 'connectors': 0, 'pictures': 0})
+
+    def test_drawing_tags_followed_by_a_line_break_are_counted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'f.xlsx'
+            make_book(path, flow_on_sheet='表紙')
+            spaced = Path(tmp) / 'g.xlsx'
+            with zipfile.ZipFile(path) as src, zipfile.ZipFile(spaced, 'w') as dst:
+                for item in src.infolist():
+                    data = src.read(item.filename)
+                    if item.filename == 'xl/drawings/drawing1.xml':
+                        data = data.replace(b'<xdr:sp ', b'<xdr:sp\n ').replace(b'<xdr:cxnSp ', b'<xdr:cxnSp\n ')
+                    dst.writestr(item, data)
+            stats = xlsx2ai.inspect_drawings(spaced)
+        self.assertEqual(stats['表紙'], {'shapes': len(NODES), 'connectors': len(EDGES), 'pictures': 0})
+
+    def test_tools_come_from_this_interpreter_before_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for name in ('exstruct', 'exstruct.bat'):
+                fake = Path(tmp) / name
+                fake.write_text('#!/bin/sh\nexit 9\n', encoding='utf-8')
+                fake.chmod(0o755)
+            with mock.patch.dict(os.environ, {'PATH': tmp + os.pathsep + os.environ.get('PATH', '')}):
+                with mock.patch.object(xlsx2ai.importlib.util, 'find_spec', return_value=object()):
+                    self.assertEqual(xlsx2ai.tool_command('exstruct', '--help')[:2], [sys.executable, '-c'])
+                with mock.patch.object(xlsx2ai.importlib.util, 'find_spec', return_value=None):
+                    self.assertEqual(Path(xlsx2ai.tool_command('exstruct', '--help')[0]).parent, Path(tmp))
 
     def test_missing_source_dir_is_an_error(self):
         code, log = run('/nonexistent-xlsx2ai-src', '/tmp/xlsx2ai-out')
