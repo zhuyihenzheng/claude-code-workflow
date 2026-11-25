@@ -7,12 +7,15 @@
     python3 scripts/guard.py --init-baseline      # ベースライン未登録のルールについて、既存の違反を受け入れる（人が実行する）
     python3 scripts/guard.py --format github      # GitHub Actions で、違反を PR の該当行に注釈として表示する
 
-ルールは config/guard/rules.json、ルール導入時点の既存違反は config/guard/baseline.json に置く。
-ベースラインは縮小だけができる。新しい違反は件数が増えたファイルとして検出する。
+ルールは config/guard/rules.json、ルール導入時点の既存違反は config/guard/baseline.json、
+個別の例外は config/guard/allow.json に置く。3 つとも人が承認する（Claude Code では編集に確認が入り、
+CODEOWNERS で承認者を必須にする）。ベースラインは縮小だけができる。新しい違反は件数が増えたファイルとして検出する。
 
-例外は違反行またはその直前の行に書く（承認者は人。エージェントは書かない）：
-    // guard:allow <ルールID> until=YYYY-MM-DD by=<承認者> -- <理由>
+例外（config/guard/allow.json の "allow" の 1 件）：
+    {"rule": "<ルールID>", "path": "<ファイル>", "match": "<違反行に含まれる文字列>",
+     "until": "YYYY-MM-DD", "by": "<承認者>", "reason": "<理由>"}
 期限は 1 年以内。期限切れ・項目不足・未知のルールは違反として扱う。
+ソースコードに書いた例外のコメント（guard:allow）は使えない。人の承認を経ずに書けてしまうため、違反として扱う。
 
 各ルールの examples.bad は一致し、examples.good は一致しないことを毎回確認する。
 終了コード：0 = 違反なし、1 = 違反あり、2 = 設定またはルールの誤り（検査未完了）。
@@ -34,11 +37,11 @@ import sys
 DEFAULT_ROOT = Path(__file__).resolve().parents[1]
 RULES = 'config/guard/rules.json'
 BASELINE = 'config/guard/baseline.json'
+ALLOWLIST = 'config/guard/allow.json'
 SKIP_DIRS = {'.git', 'target', 'build', 'node_modules', '.idea', '.gradle', '.mvn', '__pycache__'}
 RULE_ID = re.compile(r'[a-z0-9]+(?:-[a-z0-9]+)*')
-ALLOW_MARK = 'guard:allow'
-ALLOW = re.compile(r'guard:allow\s+(?P<id>\S+)(?P<rest>.*)$')
-ALLOW_FIELDS = re.compile(r'\s+until=(?P<until>\S+)\s+by=(?P<by>\S+)\s+--\s*(?P<reason>.*?)\s*(?:--%>|-->|\*/)?\s*$')
+INLINE_ALLOW = re.compile(r'guard:allow\b')
+ALLOW_FIELDS = ('rule', 'path', 'match', 'until', 'by', 'reason')
 MAX_ALLOW_DAYS = 366
 ALLOW_RULE = 'guard-allow'
 
@@ -220,72 +223,76 @@ def read_text(path):
 
 
 class Allow:
-    def __init__(self, line, rule_id, problem):
-        self.line, self.rule_id, self.problem, self.used = line, rule_id, problem, False
+    def __init__(self, index, data, problem):
+        self.index, self.problem, self.used = index, problem, 0
+        self.rule_id, self.path, self.match = (data.get(key) if isinstance(data, dict) else None
+                                               for key in ('rule', 'path', 'match'))
+
+    @property
+    def where(self):
+        return f'{ALLOWLIST}（allow[{self.index}]）'
+
+    def covers(self, rule_id, path, source):
+        return self.problem is None and self.rule_id == rule_id and self.path == path and self.match in source
 
 
-def parse_allows(lines, rule_ids, today):
+def load_allows(root, rule_ids, today):
+    """Exceptions from config/guard/allow.json. Entries with a problem cover nothing and are reported."""
+    path = root / ALLOWLIST
+    if not path.is_file():
+        return []
+    try:
+        data = json.loads(path.read_text(encoding='utf-8'))
+        entries = data['allow']
+        if not isinstance(entries, list):
+            raise TypeError('"allow" must be an array')
+    except (ValueError, KeyError, TypeError) as error:
+        raise ConfigError(f'{ALLOWLIST} が不正です：{error}') from None
     allows = []
-    for number, line in enumerate(lines, 1):
-        found = ALLOW.search(line)
-        if not found:
-            continue
-        rule_id, fields = found.group('id'), ALLOW_FIELDS.match(found.group('rest'))
+    for index, entry in enumerate(entries):
         problem = None
-        if rule_id not in rule_ids:
-            problem = f'未知のルール {rule_id!r} の例外です'
-        elif not fields or not fields.group('reason'):
-            problem = '例外には until=YYYY-MM-DD by=<承認者> -- <理由> が必要です'
+        missing = [key for key in ALLOW_FIELDS
+                   if not isinstance(entry, dict) or not isinstance(entry.get(key), str) or not entry[key].strip()]
+        if missing:
+            problem = f'例外に {", ".join(missing)} がありません（{", ".join(ALLOW_FIELDS)} がすべて必要）'
+        elif entry['rule'] not in rule_ids:
+            problem = f'未知のルール {entry["rule"]!r} の例外です'
         else:
             try:
-                until = datetime.date.fromisoformat(fields.group('until'))
+                until = datetime.date.fromisoformat(entry['until'])
             except ValueError:
                 until = None
             if until is None:
-                problem = f'until={fields.group("until")} は日付ではありません'
+                problem = f'until={entry["until"]} は日付ではありません'
             elif until < today:
                 problem = f'例外の期限が切れています（until={until}）。根本原因を直すか、人が期限を見直す'
             elif (until - today).days > MAX_ALLOW_DAYS:
                 problem = f'例外の期限は 1 年以内にする（until={until}）'
-        allows.append(Allow(number, rule_id, problem))
+        allows.append(Allow(index, entry, problem))
     return allows
 
 
-def mask_allows(text):
-    return re.sub(r'guard:allow[^\n]*', lambda m: ' ' * len(m.group(0)), text)
-
-
-def scan(root, rules, files, today):
-    """Return (violations, allow_problems, allows). A violation is (rule_id, path, line, source_line)."""
-    rule_ids = {r.id for r in rules}
-    violations, allow_problems, all_allows = [], [], []
+def scan(root, rules, files, allows):
+    """Return (violations, inline_allows). A violation is (rule_id, path, line, source_line)."""
+    violations, inline = [], []
     for rel in files:
         applicable = [r for r in rules if r.applies(rel)]
         if not applicable:
             continue
         text = read_text(root / rel)
         lines = text.split('\n')
-        allows = parse_allows(lines, rule_ids, today) if ALLOW_MARK in text else []
-        by_line = {}
-        for allow in allows:
-            by_line.setdefault(allow.line, []).append(allow)
-        scanned = mask_allows(text) if allows else text
-        newlines = [m.start() for m in re.finditer('\n', scanned)]
+        inline += [(rel, number) for number, line in enumerate(lines, 1) if INLINE_ALLOW.search(line)]
+        newlines = [m.start() for m in re.finditer('\n', text)]
         for rule in applicable:
-            for match in rule.regex.finditer(scanned):
+            for match in rule.regex.finditer(text):
                 number = bisect.bisect_left(newlines, match.start()) + 1
-                covering = [a for n in (number, number - 1) for a in by_line.get(n, []) if a.rule_id == rule.id]
-                valid = [a for a in covering if a.problem is None]
-                if valid:
-                    for allow in valid:
-                        allow.used = True
-                    continue
-                violations.append((rule.id, rel, number, lines[number - 1].strip()))
-        for allow in allows:
-            all_allows.append((rel, allow))
-            if allow.problem:
-                allow_problems.append((ALLOW_RULE, rel, allow.line, allow.problem))
-    return violations, allow_problems, all_allows
+                source = lines[number - 1].strip()
+                covering = [a for a in allows if a.covers(rule.id, rel, source)]
+                for allow in covering:
+                    allow.used += 1
+                if not covering:
+                    violations.append((rule.id, rel, number, source))
+    return violations, inline
 
 
 def compare(violations, baseline):
@@ -326,11 +333,12 @@ def annotate(level, path, line, title, message):
     print(f'::{level} file={prop(path)},line={line},title={prop(title)}::{data(message)}')
 
 
-def print_rules(rules, baseline):
+def print_rules(rules, baseline, allows):
     for rule in rules:
         state = ('ベースライン未登録' if baseline is None or rule.id not in baseline
                  else f'既存違反 {sum(baseline[rule.id].values())} 件を受け入れ済み')
-        print(f'{rule.id}  [{state}]')
+        exceptions = sum(1 for a in allows if a.rule_id == rule.id and a.problem is None)
+        print(f'{rule.id}  [{state}' + (f'、例外 {exceptions} 件' if exceptions else '') + ']')
         print(f'  対象：{", ".join(rule.patterns)}')
         print(f'  直し方：{rule.message}')
         if rule.origin:
@@ -362,8 +370,9 @@ def main(argv=None):
         rules = load_rules(root)
         rule_ids = {r.id for r in rules}
         baseline = load_baseline(root, rule_ids)
+        allows = load_allows(root, rule_ids, today)
         if args.list:
-            print_rules(rules, baseline)
+            print_rules(rules, baseline, allows)
             return 0
         if args.paths and (args.update_baseline or args.init_baseline):
             raise ConfigError('ベースラインの更新はプロジェクト全体を対象にする（PATH を指定しない）')
@@ -372,7 +381,10 @@ def main(argv=None):
         print(f'guard: 検査未完了：{error}', file=sys.stderr)
         return 2
 
-    violations, allow_problems, allows = scan(root, rules, files, today)
+    violations, inline = scan(root, rules, files, allows)
+    allow_problems = [(ALLOW_RULE, ALLOWLIST, 1, f'allow[{a.index}]：{a.problem}') for a in allows if a.problem]
+    allow_problems += [(ALLOW_RULE, path, number, f'ソースコードの例外コメント（guard:allow）は使えない。例外は人が {ALLOWLIST} に登録する')
+                       for path, number in inline]
     counts = Counter((rule_id, path) for rule_id, path, _, _ in violations)
 
     if args.init_baseline:
@@ -408,11 +420,11 @@ def main(argv=None):
         if args.format == 'github':
             annotate('error', path, number, f'guard {rule_id}', problem)
         print(f'{path}:{number}: [{rule_id}] {problem}')
-    for path, allow in allows:
-        if allow.problem is None and not allow.used:
+    for allow in allows:
+        if allow.problem is None and not allow.used and (not args.paths or allow.path in files):
             if args.format == 'github':
-                annotate('warning', path, allow.line, 'guard', f'使われていない例外です（{allow.rule_id}）')
-            print(f'{path}:{allow.line}: [警告] 使われていない例外です（{allow.rule_id}）。不要なら削除する')
+                annotate('warning', ALLOWLIST, 1, 'guard', f'使われていない例外です（allow[{allow.index}] {allow.rule_id} {allow.path}）')
+            print(f'{allow.where}: [警告] 使われていない例外です（{allow.rule_id} {allow.path}）。人が削除する')
 
     if baseline is not None and not args.paths:
         stale = sum(n - min(n, counts.get((rule_id, path), 0))
@@ -420,7 +432,7 @@ def main(argv=None):
         if stale and not args.update_baseline:
             print(f'guard: 既存の違反が {stale} 件減りました。python3 scripts/guard.py --update-baseline でベースラインを縮小する')
 
-    used = sum(1 for _, allow in allows if allow.used)
+    used = sum(allow.used for allow in allows)
     if failing or allow_problems:
         uninitialized = sorted({f[0] for f in failing} - set(baseline or {}))
         print(f'guard: NG：新しい違反 {len(failing) + len(allow_problems)} 件（{len(rules)} ルール、{len(files)} ファイルを検査）。'

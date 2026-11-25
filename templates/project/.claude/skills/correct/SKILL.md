@@ -55,7 +55,7 @@ description: 人から修正を指示されたとき、または同じレビュ�
 
 - 既存の違反が少なければ、同じ PR の別コミットで直す。古いパターンが残っていると、次のエージェントがそれを手本にする。
 - 多い場合は、件数とファイルを報告し、人に既存の違反の受け入れを依頼する。エージェントは自分で受け入れない。
-  - guard：`python scripts/guard.py --init-baseline`。エージェントは実行せず、ベースラインを編集せず、`guard:allow` も書かない（Claude Code では権限設定で確認が入る。Copilot には同じ制限がないため、`CODEOWNERS` で人の承認を必須にする）。
+  - guard：`python scripts/guard.py --init-baseline`。エージェントは実行せず、`config/guard/` のベースライン（`baseline.json`）と例外（`allow.json`）を編集しない（Claude Code では `config/guard/` の編集と `--init-baseline` に確認が入る。Copilot には同じ制限がないため、`CODEOWNERS` で人の承認を必須にする）。ソースコードの例外コメント（`guard:allow`）は guard が違反として扱う。
   - ArchUnit：ルールを `FreezingArchRule.freeze(...)` で包み、人が `./mvnw test -Dtest=ArchitectureTest -Darchunit.freeze.store.default.allowStoreCreation=true` を一度実行して記録をコミットする。
   - PMD：人が pom.xml の `maxAllowedViolations` を現在の件数にする。
   いずれも、以後は件数が縮小だけできる状態にする。

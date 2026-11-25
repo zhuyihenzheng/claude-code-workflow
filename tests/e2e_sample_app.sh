@@ -2,7 +2,7 @@
 # End-to-end check of the templates against a real Spring Boot + JSP + HTMX app.
 # Runs in CI (needs JDK 21, Maven, Node with playwright + htmx.org installed in the repo root).
 # Steps: install templates -> guard (pass + real past mistakes) -> ./mvnw verify (JUnit, ArchUnit, PMD on JSP)
-#        -> what guard cannot see: ArchUnit and PMD catch it -> Stop hook (pass + real compile failure)
+#        -> unit test record from the JUnit results -> project knowledge is current -> what guard cannot see: ArchUnit and PMD catch it -> Stop hook (pass + real compile failure)
 #        -> start the app -> htmx-check.mjs (success, 422 re-render, escaping) -> feature map recipes
 #        -> screen tests, also against an Excel design document converted to Markdown by xlsx2ai.py
 #        -> screen tests (framework installed from GitHub at the pinned commit) -> xlsx_patch on the generated results.
@@ -68,6 +68,17 @@ python scripts/guard.py > /dev/null
 step "./mvnw verify (JUnit + MockMvc, ArchUnit, PMD on JSP)"
 ./mvnw -B -q verify
 grep -q 'tests="3"' target/surefire-reports/TEST-ArchitectureTest.xml
+
+step "Unit test report: the JUnit results and @DisplayName become the test record (Markdown and Excel)"
+python scripts/junit_report.py --title 注文サンプル | tee "$OUT/junit-report.txt"
+grep -q '| 判定 | 合格 |' target/test-report/単体テスト成績書.md
+grep -q '| S01 注文登録（OrderControllerTest） | 名前が空白のとき、422 とフォームのフラグメントを返す |' target/test-report/単体テスト成績書.md
+test -s target/test-report/単体テスト成績書.xlsx
+cp target/test-report/単体テスト成績書.* "$OUT/"
+
+step "Project knowledge: the code map and glossary point at files and features that exist"
+python scripts/knowledge_check.py | tee "$OUT/knowledge.txt"
+grep -q 'knowledge: OK（2 ファイル）' "$OUT/knowledge.txt"
 
 step "ArchUnit: a same-package repository used by the controller passes guard but fails the layer rule"
 cp "$CONTROLLER" "$OUT/OrderController.java.orig"

@@ -8,9 +8,10 @@
 - JSP：scriptlet の新規追加は禁止する。EL + JSTL を使用し、出力はコンテキストに応じてエスケープする。業務ロジックは Controller/Service に配置し、既存画面の修正は必要最小限とする。
 - HTMX：画面全体と部分テンプレート（フラグメント）は別々のビューとし、JSP では `:: fragment` を使用しない。`hx-target` の対象が存在することを確認する。422 で再表示する場合は swap 設定を事前に確認し、共通の CSRF ヘッダーを付与する。入力チェックエラー時とセッション失効時も確認し、フラグメントにログイン画面全体を表示しない。`HX-Request` を認証・認可の判断根拠にしない。
 - Excel 設計書は直接読まず、`specs-ai/index.md` から必要なシートの Markdown（`sheets/<シート>.md`）だけを参照する。修正は変更指示（JSON）を書いて `scripts/xlsx_patch.py` で適用し、直接編集しない。画面試験の期待値は設計書から取り、`baseline.json` は人だけが更新する。
-- 決定的チェック：変更後とコミット前に `python scripts/guard.py` を実行し、違反は表示された直し方で直す。`./mvnw verify` の ArchUnit（レイヤー）と PMD（JSP のエスケープ）の失敗も、表示された理由に従って直す。ルールを弱めず、例外（`guard:allow`）とベースラインを追加しない（人だけが行う）。回避策を正当化するコメントやコメントアウトしたコードを残さない。
-- 手順：エンドポイントの追加、改修、人からの修正指示、機能マップは `.claude/skills/` の skill（`spring-endpoint`、`change-flow`、`correct`、`feature-map`）に従う。Copilot もこのディレクトリの skill を読み込む。
-- レビュー：`REVIEW.md` の順序と観点で確認する。証跡から始め、新しい `guard:allow`、ベースラインの件数の増加、ルールの削除や緩和はマージ不可として指摘する。
+- 決定的チェック：変更後とコミット前に `python scripts/guard.py` を実行し、違反は表示された直し方で直す。`./mvnw verify` の ArchUnit（レイヤー）と PMD（JSP のエスケープ）の失敗も、表示された理由に従って直す。ルールを弱めず、例外（`config/guard/allow.json`）とベースラインを追加しない（人だけが行う）。回避策を正当化するコメントやコメントアウトしたコードを残さない。
+- 手順：エンドポイントの追加、改修、人からの修正指示、機能マップ、プロジェクト知識の書き戻しは `.claude/skills/` の skill（`spring-endpoint`、`change-flow`、`correct`、`feature-map`、`knowledge`）に従う。Copilot もこのディレクトリの skill を読み込む。
+- プロジェクト知識：作業の最初に `docs/knowledge/`（用語集・コードマップ）を読み、最後に確かめた事実を書き戻して `python scripts/knowledge_check.py` を実行する。設計書とコードの対応は `python scripts/spec_sync.py` で確認する。単体テスト成績書は `./mvnw test` の後に `python scripts/junit_report.py` で作成し、手で編集しない。
+- レビュー：`REVIEW.md` の順序と観点で確認する。証跡から始め、例外（`config/guard/allow.json`）の追加、ベースラインの件数の増加、ルールの削除や緩和はマージ不可として指摘する。
 - マージ済みマイグレーションは変更せず、タスクの範囲外のコードをついでにリファクタリングしない。バージョン、画面構成、具体的なコマンドは `AGENTS.md` の「本システム固有情報」を参照し、「チーム共通ルール」を緩和しない。
 
 パス別の詳細ルールは `.claude/rules/` から `.github/instructions/` へ一方向に生成する。生成ファイルを直接編集しない。Copilot の各機能（code review を含む）で `AGENTS.md` も読み込まれるか、どのパス別指示がサポートされるかは、バージョンと利用機能によって異なる。GitHub の公式ドキュメントを確認すること。

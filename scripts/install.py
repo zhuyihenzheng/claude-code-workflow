@@ -223,7 +223,10 @@ def plan_project(target, with_workflows=False, with_screen_tests=False, with_arc
             continue
         kind = 'json' if rel in JSON_MERGE else 'lines' if rel in LINE_MERGE else None
         action = plan_file(rel, source, dest, kind)
-        if rel.startswith(ARCHUNIT) and action.kind == 'create' and 'archunit' not in all_poms(target):
+        if rel.startswith(ARCHUNIT) and action.kind == 'create' and root_is_aggregator(target):
+            action.note = ('the root pom.xml has packaging pom, so tests here never run: copy it into src/test/java '
+                           'of each module with Controller/Service classes')
+        elif rel.startswith(ARCHUNIT) and action.kind == 'create' and 'archunit' not in all_poms(target):
             action.note = f'add the archunit-junit5 dependency from {POM_SNIPPET} to pom.xml, or test compilation fails'
         actions.append(action)
     claude_md = next(a for a in actions if a.rel == 'CLAUDE.md')
@@ -379,6 +382,7 @@ def doctor(target):
             else '.github/instructions/ is out of sync with .claude/rules/: run scripts/sync_rules.py')
 
     doctor_guard(target, agents, add)
+    doctor_knowledge(target, add)
     doctor_structure(target, agents, add)
     doctor_codeowners(target, add)
 
@@ -428,6 +432,47 @@ def doctor_guard(target, agents, add):
         else 'docs/feature-map/ has no feature files: agents and reviewers have no shared names or recipes for the screens')
 
 
+def run_script(target, script):
+    """(exit code, last output line) of a template script run against the project, or None if it is missing."""
+    path = target / 'scripts' / script
+    if not path.is_file():
+        return None
+    result = subprocess.run([sys.executable, str(path), '--root', str(target)], capture_output=True, text=True,
+                            encoding='utf-8', errors='replace', env={**os.environ, 'PYTHONIOENCODING': 'utf-8'})
+    lines = (result.stdout.strip() or result.stderr.strip()).splitlines()
+    return result.returncode, (lines[-1] if lines else '')
+
+
+def doctor_knowledge(target, add):
+    """Project knowledge (glossary, code map) is current, and design tables are checked against the code."""
+    knowledge = run_script(target, 'knowledge_check.py')
+    if knowledge is None:
+        add('warn', 'scripts/knowledge_check.py is missing: nothing notices when docs/knowledge/ goes stale')
+    elif knowledge[0] != 0:
+        add('fail', f'docs/knowledge/ is out of date (run python3 scripts/knowledge_check.py): {knowledge[1]}')
+    elif not any(p.name != 'README.md' for p in (target / 'docs/knowledge').glob('*.md')):
+        add('warn', 'docs/knowledge/ has no glossary or code map yet: agents rediscover the code and the domain words '
+                    'every task (the knowledge skill writes them back)')
+    else:
+        add('ok', knowledge[1])
+    config = target / 'config/spec-sync.json'
+    sync = run_script(target, 'spec_sync.py')
+    if sync is None or not config.is_file():
+        return
+    try:
+        checks = json.loads(config.read_text(encoding='utf-8')).get('checks') or []
+    except (ValueError, AttributeError):
+        checks = None
+    if sync[0] != 0:
+        add('fail', f'design documents and code disagree or config/spec-sync.json is broken '
+                    f'(run python3 scripts/spec_sync.py): {sync[1]}')
+    elif not checks:
+        add('warn', 'config/spec-sync.json registers no design-to-code checks: a design change that misses the code '
+                    '(or the reverse) is found only in review')
+    else:
+        add('ok', sync[1])
+
+
 def all_poms(target):
     """Text of every pom.xml in the project (multi-module builds configure plugins per module)."""
     texts = []
@@ -435,6 +480,13 @@ def all_poms(target):
         if not {'target', 'node_modules', '.git'}.intersection(pom.relative_to(target).parts):
             texts.append(pom.read_text(encoding='utf-8', errors='replace'))
     return '\n'.join(texts)
+
+
+def root_is_aggregator(target):
+    """A root pom.xml with <packaging>pom</packaging> compiles and runs no tests of its own."""
+    pom = target / 'pom.xml'
+    text = pom.read_text(encoding='utf-8', errors='replace') if pom.is_file() else ''
+    return bool(re.search(r'<packaging>\s*pom\s*</packaging>', re.sub(r'<parent>.*?</parent>', '', text, flags=re.S)))
 
 
 def tags(agents, tool):
@@ -448,7 +500,10 @@ def doctor_structure(target, agents, add):
     poms = all_poms(target)
     test = target / ARCHUNIT / 'ArchitectureTest.java'
     archunit_rules = tags(agents, 'ArchUnit')
-    if test.is_file() and 'archunit' not in poms:
+    if test.is_file() and root_is_aggregator(target):
+        add('fail', f'{ARCHUNIT}ArchitectureTest.java is in the root module, whose packaging is pom: it never compiles '
+                    'or runs. Copy it into src/test/java of each module with Controller/Service classes')
+    elif test.is_file() and 'archunit' not in poms:
         add('fail', f'{ARCHUNIT}ArchitectureTest.java exists but no pom.xml has the archunit-junit5 dependency '
                     f'({POM_SNIPPET}): test compilation fails')
     elif archunit_rules and not test.is_file():

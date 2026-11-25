@@ -62,6 +62,7 @@ CLAUDE.md                         @AGENTS.md と Claude Code 固有の補足
 .claude/skills/change-flow/       改修の標準手順（設計書 → 実装 → 単体テスト → 画面試験 → 試験書）
 .claude/skills/correct/           修正指示を設計・型・guard のルール・テストに変える手順
 .claude/skills/feature-map/       機能マップ（docs/feature-map/）の作成・更新
+.claude/skills/knowledge/         作業の最後に、確かめた事実（用語、コードの場所、注意点）を docs/knowledge/ に書き戻す
 .claude/hooks/verify-stop.py      Stop hook の参考サンプル（未登録、POSIX 向け）
 .claude/README.md                 設定ガイド（人向け、セッションには読み込まれない）
 .github/copilot-instructions.md   Copilot 向けの要約
@@ -71,15 +72,22 @@ CLAUDE.md                         @AGENTS.md と Claude Code 固有の補足
 REVIEW.md                         レビューの順序と観点（Claude のレビュー用サブエージェント、Copilot のコードレビュー、人が共通で使う）
 config/copilot/                   Copilot のコンテンツ除外（settings の deny と同じ対象）と設定の説明
 config/guard/rules.json           guard のルール（直し方、由来、実際の誤りの例を持つ。初期 10 件）
+config/guard/allow.json           guard の例外。人だけが登録する（期限・承認者・理由）。編集は ask、CODEOWNERS で管理する
+config/spec-sync.json             設計書の表とコードの値の対応（例：メッセージ一覧 ↔ messages.properties）
 config/pmd/jsp-ruleset.xml        PMD による JSP のエスケープ漏れ検査
 config/quality/pom-snippet.xml    pom.xml に追加する ArchUnit と maven-pmd-plugin（どちらも ./mvnw verify で実行される）
 docs/feature-map/README.md        機能マップの書式（1 機能 1 ファイル、コマンドと合格条件）
+docs/knowledge/README.md          プロジェクト知識の書式（用語集：業務用語 ↔ コード上の名前、コードマップ：機能 ID ↔ ファイルと注意点）
 .mcp.json                         Playwright（--isolated、ローカルプロセス、バージョン固定）
 scripts/sync_rules.py             rules から Copilot の指示を生成し、--check で差分を検出する
 scripts/guard.py                  決定的チェック：新しい違反、期限切れの例外、壊れたルールで失敗する。既存の違反は縮小だけができる
 scripts/htmx-check.mjs            実ブラウザーで HTMX のフラグメント置換を検証する（ログイン状態、セッション失効に対応）
 scripts/xlsx2ai.py                Excel 設計書をシート単位の Markdown（表・見出し・字下げの箇条書き・Mermaid）と JSON に変換する
-scripts/xlsx_patch.py             変更指示どおりに Excel を書き換える（指示したセル以外は変更しない）
+scripts/xlsx_patch.py             変更指示どおりに Excel を書き換える（指示したセル以外は変更しない。表の下の空き行に行を追加できる）
+scripts/spec_sync.py              設計書の表とコードの値が一致するか（実装漏れと設計書の更新漏れ）
+scripts/junit_report.py           JUnit の結果から単体テスト成績書（Markdown と Excel。観点は @DisplayName）
+scripts/knowledge_check.py        docs/knowledge/ のパス・機能 ID・用語が古くなっていないか
+scripts/ai_metrics.py             AI の PR の手戻り・変更要求・一発で通った割合の月ごとの推移と、追加したルール・知識の更新の数
 screen-tests/                     （任意）画面試験。バージョンを固定した midscene-poc を使用する
 src/test/java/ArchitectureTest.java （任意、--with-archunit）コンパイル済みの依存関係でレイヤーとフィールドインジェクションを検査する
 ```
@@ -95,6 +103,7 @@ src/test/java/ArchitectureTest.java （任意、--with-archunit）コンパイ�
 | `guard.py` の単体テスト（3 OS）、サンプルアプリでの合格・実際の誤りの検出、機能マップのコマンドの実行（Ubuntu） | 初期ルールの業務コードでの誤検知率、`correct` の実際の修正指示での動き |
 | ArchUnit と PMD：サンプルアプリの `./mvnw verify`、guard では見えない同一パッケージの参照と、エスケープしていない EL の検出（Ubuntu） | マルチモジュールや既存の違反が多いプロジェクトへの導入 |
 | Excel 設計書 → Markdown：合成ブックの単体テスト（3 OS）、サンプルアプリの Excel 版設計書から変換した Markdown で画面試験の観点カバレッジが Markdown 版と一致（Ubuntu） | 公開サンプルと書式が異なる実際の設計書での復元品質 |
+| 単体テスト成績書：サンプルアプリの `./mvnw verify` の結果から Markdown と Excel を作成、観点は `@DisplayName`（Ubuntu）。`spec_sync.py`、`knowledge_check.py`、`ai_metrics.py`、`xlsx_patch.py` の行追加：単体テスト（3 OS） | 実際のプロジェクトで知識の蓄積が改修の精度を上げるか（`ai_metrics.py` で数か月の推移を見る） |
 
 ```bash
 python3 -m pip install -r requirements-dev.txt     # Python 3.11+

@@ -1,0 +1,4 @@
+{
+  "_note": "guard の例外。人だけが追加・更新する（Claude Code では編集に確認が入る。CODEOWNERS で承認者を必須にする）。1 件ごとに rule, path, match（違反行に含まれる文字列）, until（1 年以内）, by（承認者）, reason を書く。",
+  "allow": []
+}

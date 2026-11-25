@@ -80,6 +80,18 @@ class InstallTests(unittest.TestCase):
         self.assertRegex(out, r'create\s+src/test/java/ArchitectureTest\.java\n')
         self.assertTrue((self.target / 'src/test/java/ArchitectureTest.java').is_file())
 
+    def test_archunit_in_an_aggregator_root_is_flagged(self):
+        pom = ('<project><parent><packaging>jar</packaging></parent><packaging>pom</packaging>'
+               '<modules><module>order-web</module></modules><artifactId>archunit-junit5</artifactId></project>')
+        (self.target / 'pom.xml').write_text(pom, encoding='utf-8')
+        code, out, _ = run('project', self.target, '--with-archunit', '--apply')
+        self.assertRegex(out, r'create\s+src/test/java/ArchitectureTest\.java\s+\(the root pom\.xml has packaging pom')
+        found = self.doctor()
+        self.assertTrue(any(m.startswith('src/test/java/ArchitectureTest.java is in the root module, whose packaging is pom')
+                            and lv == 'fail' for m, lv in found.items()), found)
+        (self.target / 'pom.xml').write_text(pom.replace('<packaging>pom</packaging>', ''), encoding='utf-8')
+        self.assertFalse(any(m.startswith('src/test/java/ArchitectureTest.java is in the root module') for m in self.doctor()))
+
     def test_copilot_cloud_agent_setup_is_a_separate_opt_in(self):
         setup = self.target / '.github/workflows/copilot-setup-steps.yml.example'
         code, out, _ = run('project', self.target, '--apply', '--with-workflows')
@@ -319,7 +331,16 @@ class InstallTests(unittest.TestCase):
         run('project', self.target, '--apply', '--with-archunit')
         self.assertRegex(out, r'warn\s+no CODEOWNERS')
         (self.target / '.github/CODEOWNERS').write_text('/config/guard/ @org/leads\n', encoding='utf-8')
+        (self.target / 'docs/knowledge/glossary.md').write_text('| 用語 | 意味 |\n|---|---|\n| 注文 | 登録するもの |\n',
+                                                                encoding='utf-8')
+        (self.target / 'docs/msg.md').write_text('| ID | 文言 |\n|---|---|\n| E1 | a |\n', encoding='utf-8')
+        (self.target / 'messages.properties').write_text('E1=a\n', encoding='utf-8')
+        (self.target / 'config/spec-sync.json').write_text(json.dumps({'checks': [
+            {'id': 'm', 'design': {'file': 'docs/msg.md', 'key': 'ID', 'value': '文言'},
+             'code': {'files': ['messages.properties'], 'pattern': '^(?P<key>\\w+)=(?P<value>.*)$'}}]}), encoding='utf-8')
         code, out, _ = run('doctor', self.target)
+        self.assertRegex(out, r'ok\s+knowledge: OK')
+        self.assertRegex(out, r'ok\s+spec_sync: OK')
         self.assertRegex(out, r'ok\s+ArchitectureTest\.java defines the 3 ArchUnit rule\(s\)')
         self.assertEqual(code, 0, out)
         self.assertRegex(out, r'ok\s+guard passes')
@@ -409,6 +430,27 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(found["AGENTS.md tags ArchUnit rules missing from ArchitectureTest.java: ['no_field_injection']"], 'fail')
         self.assertEqual(found["AGENTS.md tags PMD rules missing from config/pmd/jsp-ruleset.xml: ['NoUnsanitizedJSPExpression']"],
                          'fail')
+
+    def test_doctor_checks_project_knowledge_and_design_to_code_checks(self):
+        run('project', self.target, '--apply')
+        found = self.doctor()
+        self.assertTrue(any(m.startswith('docs/knowledge/ has no glossary or code map yet') and lv == 'warn' for m, lv in found.items()))
+        self.assertTrue(any(m.startswith('config/spec-sync.json registers no design-to-code checks') and lv == 'warn'
+                            for m, lv in found.items()))
+        knowledge = self.target / 'docs/knowledge/codemap.md'
+        knowledge.write_text('# コードマップ\n\n- 画面：`src/main/webapp/gone.jsp`\n', encoding='utf-8')
+        found = self.doctor()
+        self.assertTrue(any(m.startswith('docs/knowledge/ is out of date') and lv == 'fail' for m, lv in found.items()), found)
+        knowledge.write_text('# コードマップ\n\n- 設定：`config/spec-sync.json`\n', encoding='utf-8')
+        self.assertEqual(self.doctor()['knowledge: OK（1 ファイル）'], 'ok')
+        (self.target / 'docs/msg.md').write_text('| ID | 文言 |\n|---|---|\n| E1 | a |\n', encoding='utf-8')
+        (self.target / 'messages.properties').write_text('E1=b\n', encoding='utf-8')
+        check = {'id': 'm', 'design': {'file': 'docs/msg.md', 'key': 'ID', 'value': '文言'},
+                 'code': {'files': ['messages.properties'], 'pattern': '^(?P<key>\\w+)=(?P<value>.*)$'}}
+        (self.target / 'config/spec-sync.json').write_text(json.dumps({'checks': [check]}), encoding='utf-8')
+        self.assertTrue(any(m.startswith('design documents and code disagree') and lv == 'fail' for m, lv in self.doctor().items()))
+        (self.target / 'messages.properties').write_text('E1=a\n', encoding='utf-8')
+        self.assertEqual(self.doctor()['spec_sync: OK（1 チェック、1 項目が一致）'], 'ok')
 
     def test_doctor_checks_that_a_person_owns_the_guard_rules(self):
         run('project', self.target, '--apply')
